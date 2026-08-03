@@ -21,18 +21,23 @@ node skills/cartography/scripts/cartography.mjs check  --root .   # report only,
 
 ## The rule that makes it re-runnable
 
-**Two tables. The extractor writes one and never opens the other.**
+**Two tables. The extractor rewrites one and never writes the other.**
 
 | table | owner | on every run |
 | --- | --- | --- |
-| `data/surfaces/` | machine | deleted and rewritten wholesale |
-| `data/features/` | human | untouched |
+| `data/surfaces/` | machine | rows deleted and rewritten wholesale |
+| `data/features/` | human | read for its `owns:` globs, never written |
 
-They join through `owns:` globs on a feature — declared by a person, evaluated by the machine.
+They join through `owns:` globs on a feature — declared by a person, evaluated by the machine. The
+result lands back on the surface as `claimed_by`, so who claims a screen is a committed fact rather
+than a number in a console. Narrow a glob and the row changes; the check that watches every other
+generated fact watches that one too.
 
 Mixing generated and authored fields in one file makes every re-run a merge conflict. Splitting
 them makes regeneration safe by construction: nothing you wrote is at risk, because the extractor
-has no reason to open your file.
+has no reason to write your file.
+
+Editing a feature's `owns:` therefore means re-running `sync` — the join moved.
 
 Rows carry **no timestamp**. A generated file that embeds the time it was generated differs on
 every run, and a check that always fails is a check nobody reads.
@@ -53,14 +58,19 @@ wearing a product's clothes. Name the job first; attach screens to it with `owns
 
 ## What `check` reports
 
-| mark | finding |
-| --- | --- |
-| `+` `-` `~` | a screen appeared, vanished, or changed scope/route/layout |
-| `?` | a screen no feature's `owns:` glob claims |
-| `!` | a feature whose globs match nothing — renamed or deleted code |
+| mark | finding | exit |
+| --- | --- | --- |
+| `+` `-` `~` | a screen appeared, vanished, or changed scope/route/layout | 1 |
+| `!` | a feature whose globs match nothing — renamed or deleted code | 1 |
+| `?` | a screen no feature's `owns:` glob claims | 0 |
 
-The committed rows are the baseline; `check` compares a fresh extraction against them. `?` is the
-gap report: the parts of the app serving no articulated job. `!` is its mirror.
+The committed rows are the baseline; `check` compares a fresh extraction against them.
+
+**Only stale facts fail.** `+ - ~ !` mean the committed map is untrue, and one `sync` fixes it.
+`?` is the gap report — the parts of the app serving no articulated job — and on an existing
+codebase it starts at nearly every screen. Failing on it would make the gate unusable the day it
+is installed, and a check nobody can turn green is a check that gets deleted. Coverage is held
+instead by `claimed_by` in the rows: lose a claim and it surfaces as `~`, which does fail.
 
 ## Using it
 

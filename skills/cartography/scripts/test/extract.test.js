@@ -213,8 +213,26 @@ describe("the owns join", () => {
   };
 
   test("claims a surface via a block-style owns list", () => {
-    const r = run(withFeature("owns:\n  - src/pages/Alpha.tsx"), "check");
+    const root = withFeature("owns:\n  - src/pages/Alpha.tsx");
+    run(root);
+    const r = run(root, "check");
     assert.doesNotMatch(r.out, /claimed by no feature/);
+    assert.deepEqual(rows(root).alpha.claimed_by, ["F-1"]);
+    assert.equal(r.code, 0);
+  });
+
+  test("passes check while screens still await a job, and fails once the map is stale", () => {
+    // Coverage on an existing codebase starts near total. A gate that cannot be turned green on
+    // the day it is installed gets deleted, so only stale facts fail.
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    run(root);
+    const clean = run(root, "check");
+    assert.match(clean.out, /claimed by no feature/);
+    assert.equal(clean.code, 0, "unclaimed screens must not fail the gate");
+
+    writeFileSync(join(root, "src/App.tsx"), `<Routes>\n<Route path="b" element={<Beta />} />\n</Routes>\n`);
+    const stale = run(root, "check");
+    assert.equal(stale.code, 1, "a map that no longer matches the code must fail");
   });
 
   test("does not report a feature owning code this extractor cannot see", () => {
