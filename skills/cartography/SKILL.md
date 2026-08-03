@@ -30,6 +30,7 @@ wherever it landed. It needs Node and a git checkout; that is all.
 | table | owner | on every run |
 | --- | --- | --- |
 | `data/surfaces/` | machine | rows deleted and rewritten wholesale |
+| `data/resources/` | machine | rows deleted and rewritten wholesale |
 | `data/features/` | human | read for its `owns:` globs; **no row is ever written** |
 
 (`init` may create `data/features/_inventory.md` once, if absent. It is a `_`-prefixed draft, not a
@@ -62,6 +63,25 @@ say what is there, never why anyone would want it.
 This matters more than it sounds. Clustering by imports produces **screen-shaped clusters**,
 because imports follow screens. Accept those as features and you get a map of your navigation
 wearing a product's clothes. Name the job first; attach screens to it with `owns:` after.
+
+## The two tables it writes
+
+**`surfaces`** — one row per screen the router reaches. Where you can go.
+
+**`resources`** — one row per data noun the app addresses, reconciled across the five places a
+table can be named: a legacy table constant, the generated Supabase types, a hand-written resource
+registry, `.from(…)` calls, and migrations. Every source is recorded separately rather than merged
+into one "exists" flag, **because the disagreements are the point.** A table with RLS enabled that
+no type file knows about and no screen reaches is only visible if `declared`, `rls_enabled` and
+`reached_from_src` are allowed to contradict each other on the same row.
+
+Where a legacy and a typed table share a name — one app had `Coaches` and `coaches` — the id is
+qualified by backing rather than letting one row overwrite the other.
+
+`data/_views/blind-spots.md` is written beside them: **how much of what exists the extractor can
+see**, every denominator counted outside the map. Nothing you write in `data/` moves a number
+there; the only way to move one is to teach the extractor to see more. Expect the numbers to get
+worse when a new extractor lands — that is it working.
 
 ## What `check` reports
 
