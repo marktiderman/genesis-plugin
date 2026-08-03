@@ -100,12 +100,13 @@ Treat the map as a floor: everything in it is in the code. Not everything in the
 
 Four functions read this stack, and all four are in one file:
 
-| function | assumes |
+| seam | assumes |
 | --- | --- |
-| `routeSections` | scope prefixes declared as `<Route path="c/:id">` |
-| `extractRoutes` | React Router JSX in `src/App.tsx` |
+| `routeTokens` | React Router JSX — `<Route>` tags in `src/App.tsx` |
+| `SCOPE_PREFIX` | scopes declared as a nested `<Route path="c/:clientId">` |
 | `componentFacts` | pages under `src/pages/` or `src/components/`, ES import syntax |
 | `navFacts` | an optional `src/lib/nav-registry.ts` for groups and labels |
 
 Everything downstream — the two-table split, the `owns:` join, the drift check — is stack-agnostic.
-`navFacts` and `routeSections` degrade to empty when their inputs are absent; the other two do not.
+`navFacts` degrades to empty when its file is absent; an app with no scope prefixes simply files
+every screen under `personal`. Only `src/App.tsx` is required.
