@@ -41,8 +41,8 @@ const run = (root, cmd = "sync") => {
     return { out: (e.stdout ?? "") + (e.stderr ?? ""), code: e.status };
   }
 };
-const rows = (root) => {
-  const dir = join(root, "data/surfaces");
+const rows = (root, table = "surfaces") => {
+  const dir = join(root, "data", table);
   if (!existsSync(dir)) return {};
   return Object.fromEntries(
     readdirSync(dir)
@@ -285,6 +285,79 @@ describe("destructive operations", () => {
   });
 });
 
+describe("resources", () => {
+  /** A fixture with the five places a table can be named, each disagreeing with the others. */
+  const dataRepo = () => {
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    const put = (rel, text) => {
+      mkdirSync(join(root, rel, ".."), { recursive: true });
+      writeFileSync(join(root, rel), text, "utf8");
+    };
+    put("src/lib/airtable.ts", 'export const TABLES = {\n  PEOPLE: "People",\n}\n');
+    put(
+      "src/integrations/supabase/types.ts",
+      `    Tables: {\n      journal_entries: {\n        Row: {}\n      }\n      projects: {\n        Row: {}\n      }\n    }\n    Views: {\n`,
+    );
+    put(
+      "src/lib/resource-registry.ts",
+      `const R = [defineResource({\n  name: TABLES.PEOPLE,\n  backing: "jsonb",\n` +
+        `  fields: {\n    Name: "string",\n    Email: "string",\n  },\n  scope: "none",\n  debt: true,\n})];\n`,
+    );
+    put("src/hooks/use-journal.ts", 'supabase.from("journal_entries").select()');
+    put("src/pages/Alpha.tsx", "import { TABLES } from '@/lib/airtable';\nconst t = TABLES.PEOPLE;");
+    put(
+      "supabase/migrations/0001_init.sql",
+      `ALTER TABLE public.ghost_table ENABLE ROW LEVEL SECURITY;\n` +
+        `CREATE POLICY "Coaches manage fields on own templates" ON public.ghost_table\n  FOR SELECT USING (true);\n`,
+    );
+    put("supabase/functions/send-sms/index.ts", 'await admin.from("ghost_table").insert({})');
+    return root;
+  };
+
+  test("reconciles the sources into one row per resource", () => {
+    const root = dataRepo();
+    run(root);
+    const r = rows(root, "resources");
+    assert.deepEqual(Object.keys(r).sort(), ["ghost-table", "journal-entries", "people", "projects"]);
+    assert.equal(r.people.backing, "jsonb");
+    assert.equal(r.people.declared, "resource-registry.ts");
+    assert.equal(r.people.debt, "true");
+    assert.deepEqual(r.people.fields, ["Name", "Email"]);
+    assert.equal(r.projects.backing, "supabase");
+    assert.equal(r.projects.declared, "undeclared");
+  });
+
+  test("surfaces a table the app does not know exists", () => {
+    // The finding this table is for: created with RLS, written by an edge function, absent from
+    // the generated types and from every file in src/.
+    const root = dataRepo();
+    run(root);
+    const ghost = rows(root, "resources")["ghost-table"];
+    assert.equal(ghost.backing, "edge-only");
+    assert.equal(ghost.rls_enabled, "true");
+    assert.deepEqual(ghost.rls, ["select"]);
+    assert.deepEqual(ghost.used_by, ["send-sms"]);
+    assert.equal(ghost.reached_from_src, "false");
+  });
+
+  test("does not invent a table from words inside a policy name", () => {
+    // `ON` appears inside "manage fields on own templates"; a loose scan produced tables called
+    // `own` and `published` and filed them as orphaned findings.
+    const root = dataRepo();
+    run(root);
+    const r = rows(root, "resources");
+    assert.ok(!r.own && !r.published, "invented a table from a policy name");
+  });
+
+  test("counts a legacy table as reached, though it is never named in a .from() call", () => {
+    // Legacy tables are addressed as `TABLES.PEOPLE`. Counting only `.from()` reported every one
+    // of them as untouched by an app that reads them on nearly every screen.
+    const root = dataRepo();
+    run(root);
+    assert.equal(rows(root, "resources").people.reached_from_src, "true");
+  });
+});
+
 describe("the owns join", () => {
   const withFeature = (frontmatter) => {
     const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
@@ -352,7 +425,7 @@ describe("the owns join", () => {
     // Asserting the absence of a string also passes when the tool crashes, so pin the exit code
     // and one positive fact: this test used to survive `throw` at the top of report().
     assert.equal(r.code, 0);
-    assert.match(r.out, /surface\(s\) extracted/);
+    assert.match(r.out, /surface\(s\), \d+ resource\(s\) extracted/);
   });
 
   test("still reports a feature whose globs point into extracted territory and match nothing", () => {
