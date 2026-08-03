@@ -1,6 +1,6 @@
 {
   "name": "genesis",
-  "description": "Surgical, portable skills for agent-built software. Small process skills that work in any repo — decide with 1-3-1, align before building, debrief every cycle with one concrete 1% better.",
+  "description": "Surgical, portable skills for agent-built software. Decide with 1-3-1, align before building, debrief every cycle with one concrete 1% better, and keep a generated map of every screen the codebase has.",
   "author": {
     "name": "Mark Tiderman",
     "url": "https://github.com/marktiderman"
@@ -14,6 +14,7 @@
     "decision-making",
     "alignment",
     "retrospective",
+    "cartography",
     "agentic"
   ]
 }
