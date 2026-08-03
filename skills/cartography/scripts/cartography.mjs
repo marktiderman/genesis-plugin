@@ -62,48 +62,36 @@ function globToRe(glob) {
 const matchesAny = (path, globs) => globs.some((g) => globToRe(g).test(path));
 
 // ── extraction ──────────────────────────────────────────────────────────────────
-/**
- * Route sections keyed by scope. A scope resolver opens a nested block of routes, so the file is
- * sliced at each resolver rather than parsed as a tree — the shape only needs to be right enough
- * to say which scopes a screen is reachable in.
- */
-function routeSections(appSrc) {
-  const marks = [...appSrc.matchAll(/<Route\s+path="\/?([a-z]{1,2})\/:(\w+)"/g)].map((m) => ({
-    scope: { c: "client", t: "team", p: "project", pd: "product" }[m[1]] ?? m[1],
-    at: m.index,
-  }));
-  const cuts = [{ scope: "personal", at: 0 }, ...marks].sort((a, b) => a.at - b.at);
-  const out = {};
-  cuts.forEach((cut, i) => {
-    const end = cuts[i + 1]?.at ?? appSrc.length;
-    out[cut.scope] = appSrc.slice(cut.at, end);
-  });
-  return out;
-}
+/** URL prefix a scope resolver claims: `<Route path="c/:clientId">` opens the client scope. */
+const SCOPE_PREFIX = { c: "client", t: "team", p: "project", pd: "product" };
 
 /**
- * The opening `<Route ...>` tag of every route in a section.
+ * Every `<Route>` token in order: opening tags with their text, and closers.
  *
- * Scanned to the first `>` at brace depth zero rather than matched as a shape, because a route
- * written across several lines is still one route. Matching `element={<` as a literal missed
- * `/auth` entirely — the app's own front door — for no reason but a newline, and the map read as
- * if the screen did not exist.
+ * Each opening tag is scanned to its first `>` at brace depth zero rather than matched as a shape,
+ * because a route written across several lines is still one route. Matching `element={<` as a
+ * literal missed `/auth` — the app's own front door — for no reason but a newline, and the map
+ * then read as if the screen did not exist.
  */
-function routeTags(section) {
-  const tags = [];
-  for (const m of section.matchAll(/<Route\b/g)) {
+function routeTokens(src) {
+  const out = [];
+  for (const m of src.matchAll(/<\/?Route\b/g)) {
+    if (src[m.index + 1] === "/") {
+      out.push({ close: true });
+      continue;
+    }
     let depth = 0;
-    for (let i = m.index; i < section.length; i++) {
-      const c = section[i];
+    for (let i = m.index; i < src.length; i++) {
+      const c = src[i];
       if (c === "{") depth++;
       else if (c === "}") depth--;
       else if (c === ">" && depth === 0) {
-        tags.push(section.slice(m.index, i));
+        out.push({ close: false, text: src.slice(m.index, i), selfClosing: src[i - 1] === "/" });
         break;
       }
     }
   }
-  return tags;
+  return out;
 }
 
 /** The contents of the balanced `{...}` beginning at `open`. */
@@ -116,26 +104,41 @@ function braced(text, open) {
   return text.slice(open + 1);
 }
 
+/**
+ * A screen's scope is the resolver it is nested inside, tracked on a stack of open routes.
+ *
+ * Slicing the file positionally instead — from one resolver to the next — put every route written
+ * after the last resolver inside it. That is how the app-wide 404 came to be recorded as a product
+ * screen: a fact stated confidently and wrong, which is worse in a generated table than a gap.
+ */
 function extractRoutes(root) {
   const appPath = join(root, "src/App.tsx");
   if (!existsSync(appPath)) throw new Error(`no src/App.tsx under ${root}`);
   // A commented-out route is not a route. `{/* ... */}` is the only comment form that can wrap one.
   const src = readFileSync(appPath, "utf8").replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, "");
   const found = [];
-  for (const [scope, section] of Object.entries(routeSections(src))) {
-    for (const tag of routeTags(section)) {
-      const at = tag.indexOf("element={");
-      if (at === -1) continue; // a pathless grouping route, or the data-router `Component=` form
-      // The element may be wrapped in guards and providers (`<AdminGuard><AdminHome /></AdminGuard>`).
-      // The screen is the innermost component — the last one opened — since taking an outer one
-      // collapses every guarded page into a single row named after the guard.
-      const opened = [...braced(tag, at + "element=".length).matchAll(/<(\w+)/g)].map((m) => m[1]);
-      const component = opened.at(-1);
-      if (!component || NOT_A_SCREEN.test(component)) continue;
-      const path = (tag.match(/\bpath="([^"]*)"/) || [])[1];
-      if (path === undefined && !/\bindex\b/.test(tag)) continue;
-      found.push({ scope, path: (path ?? "").replace(/^\//, ""), component });
+  const open = []; // one entry per unclosed <Route>: the scope it opens, or null
+  for (const t of routeTokens(src)) {
+    if (t.close) {
+      open.pop();
+      continue;
     }
+    const prefix = (t.text.match(/\bpath="\/?([a-z]{1,2})\/:\w+"/) || [])[1];
+    const opens = prefix ? (SCOPE_PREFIX[prefix] ?? prefix) : null;
+    const scope = open.findLast((s) => s !== null) ?? "personal";
+    if (!t.selfClosing) open.push(opens);
+
+    const at = t.text.indexOf("element={");
+    if (at === -1) continue; // a pathless grouping route, or the data-router `Component=` form
+    // The element may be wrapped in guards and providers (`<AdminGuard><AdminHome /></AdminGuard>`).
+    // The screen is the innermost component — the last one opened — since taking an outer one
+    // collapses every guarded page into a single row named after the guard.
+    const opened = [...braced(t.text, at + "element=".length).matchAll(/<(\w+)/g)].map((m) => m[1]);
+    const component = opened.at(-1);
+    if (!component || NOT_A_SCREEN.test(component)) continue;
+    const path = (t.text.match(/\bpath="([^"]*)"/) || [])[1];
+    if (path === undefined && !/\bindex\b/.test(t.text)) continue;
+    found.push({ scope, path: (path ?? "").replace(/^\//, ""), component });
   }
   return found;
 }

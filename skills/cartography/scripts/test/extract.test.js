@@ -138,6 +138,21 @@ describe("extraction", () => {
     assert.deepEqual(rows(root).home.routes, ["personal=(index)"]);
   });
 
+  test("scopes a screen by the resolver it nests in, not by where it sits in the file", () => {
+    // The app-wide 404 is written last, after every scope block. Slicing the file positionally
+    // filed it as a product screen — stated confidently, and wrong.
+    const root = repo(
+      `<Route path="pd/:productId" element={<ProductScopeResolver />}>\n` +
+        `  <Route path="specs" element={<Specs />} />\n` +
+        `</Route>\n` +
+        `<Route path="*" element={<NotFound />} />`,
+      { Specs: "", NotFound: "" },
+    );
+    run(root);
+    assert.deepEqual(rows(root).specs.scopes, ["product"]);
+    assert.deepEqual(rows(root)["not-found"].scopes, ["personal"]);
+  });
+
   test("does not file chrome as a screen", () => {
     // The root route's element is the layout shell. It holds a path but is not somewhere you go.
     const root = repo(
