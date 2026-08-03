@@ -14,11 +14,49 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
+/**
+ * Blank out comments, preserving offsets. A commented-out policy or a `defineResource` inside an
+ * example comment otherwise becomes a live resource row — the map inventing tables out of prose.
+ */
+function stripLine(src, lineToken) {
+  let out = "";
+  for (let i = 0; i < src.length; i++) {
+    if (src.startsWith(lineToken, i)) {
+      for (; i < src.length && src[i] !== "\n"; i++) out += " ";
+      out += "\n";
+      continue;
+    }
+    if (src.startsWith("/*", i)) {
+      const end = src.indexOf("*/", i + 2);
+      const stop = end === -1 ? src.length : end + 2;
+      for (; i < stop; i++) out += src[i] === "\n" ? "\n" : " ";
+      i--;
+      continue;
+    }
+    out += src[i];
+    if (src[i] === '"' || src[i] === "'" || src[i] === "`") {
+      const q = src[i];
+      for (i++; i < src.length && src[i] !== q; i++) {
+        out += src[i];
+        if (src[i] === "\\" && i + 1 < src.length) out += src[++i];
+      }
+      if (i < src.length) out += q;
+    }
+  }
+  return out;
+}
+const stripJs = (s) => stripLine(s, "//");
+const stripSql = (s) => stripLine(s, "--");
+
 /** `export const TABLES = { PEOPLE: "People", ... }` — the legacy jsonb table names. */
+export const LEGACY_TABLE_FILES = ["src/lib/content.ts", "src/lib/airtable.ts"];
+
 export function legacyTables(root) {
-  const p = join(root, "src/lib/airtable.ts");
-  if (!existsSync(p)) return {};
-  const block = /export const TABLES\s*=\s*\{([\s\S]*?)\n\}/.exec(readFileSync(p, "utf8"));
+  // The file gets renamed — this one went `airtable.ts` -> `content.ts` and the map silently lost
+  // all 24 legacy tables, taking every registry declaration keyed on them along too.
+  const p = LEGACY_TABLE_FILES.map((f) => join(root, f)).find(existsSync);
+  if (!p) return {};
+  const block = /export const TABLES\s*=\s*\{([\s\S]*?)\n\s*\}/.exec(stripJs(readFileSync(p, "utf8")));
   if (!block) return {};
   return Object.fromEntries(
     [...block[1].matchAll(/(\w+):\s*"([^"]+)"/g)].map((m) => [m[1], m[2]]),
@@ -60,7 +98,7 @@ function bracedAfter(text, key) {
 export function declaredResources(root, tables) {
   const p = join(root, "src/lib/resource-registry.ts");
   if (!existsSync(p)) return [];
-  const src = readFileSync(p, "utf8");
+  const src = stripJs(readFileSync(p, "utf8"));
   const out = [];
   for (const chunk of src.split("defineResource({").slice(1)) {
     const head = chunk.slice(0, 4000);
@@ -73,7 +111,7 @@ export function declaredResources(root, tables) {
       name,
       backing: /backing:\s*"(\w+)"/.exec(head)?.[1] ?? null,
       description: /description:\s*"([^"]*)"/.exec(head)?.[1] ?? null,
-      fields: fields ? [...fields.matchAll(/^\s*"?([\w ]+)"?:\s*"/gm)].map((m) => m[1].trim()) : [],
+      fields: fields ? [...fields.matchAll(/^\s*(?:"([^"]+)"|\[?([\w.]+)\]?):\s*"/gm)].map((m) => (m[1] ?? m[2]).trim()) : [],
       scope: /scope:\s*"(\w+)"/.exec(head)?.[1] ?? (/scope:\s*\{/.test(head) ? "rule" : null),
       debt: /\bdebt:\s*true/.test(head),
     });
@@ -89,7 +127,7 @@ export function declaredResources(root, tables) {
  * every legacy table as unreached from `src/` — 24 rows saying the app never touches data it
  * touches on nearly every screen.
  */
-export function tableRefs(dir, tables, { label = (f) => f } = {}) {
+export function tableRefs(dir, tables, { label = (f) => f, skip = () => false } = {}) {
   const hits = {};
   const byKey = Object.entries(tables);
   const walk = (d) => {
@@ -102,11 +140,14 @@ export function tableRefs(dir, tables, { label = (f) => f } = {}) {
     for (const e of entries) {
       const path = join(d, e.name);
       if (e.isDirectory()) {
-        if (e.name !== "node_modules") walk(path);
+        if (e.name !== "node_modules" && !skip(e.name)) walk(path);
         continue;
       }
       if (!/\.(ts|tsx)$/.test(e.name)) continue;
-      const src = readFileSync(path, "utf8");
+      // The registry declares `TABLES.COACHES`; that is a declaration, not a read. Counting it
+      // marked five tables the app never touches as reached, contradicting their own `unused` note.
+      if (/resource-registry\.(ts|test\.ts)$/.test(e.name)) continue;
+      const src = stripJs(readFileSync(path, "utf8"));
       for (const m of src.matchAll(/\.from\(\s*["']([\w.]+)["']/g)) {
         (hits[m[1]] ??= new Set()).add(label(path));
       }
@@ -128,9 +169,16 @@ export function rlsFromMigrations(root) {
   const dir = join(root, "supabase/migrations");
   if (!existsSync(dir)) return {};
   const out = {};
+  // Migrations replay in order, so a later DROP retires a table an earlier one created. Without
+  // this, `companies` — dropped eight migrations back — survived as a row with full CRUD policies
+  // and was published as a finding.
+  const dropped = new Set();
   for (const file of readdirSync(dir).sort()) {
     if (!file.endsWith(".sql")) continue;
-    const sql = readFileSync(join(dir, file), "utf8");
+    const sql = stripSql(readFileSync(join(dir, file), "utf8"));
+    for (const m of sql.matchAll(/DROP TABLE\s+(?:IF EXISTS\s+)?(?:public\.)?"?(\w+)"?/gi)) {
+      dropped.add(m[1]);
+    }
     for (const m of sql.matchAll(/ALTER TABLE\s+(?:public\.)?"?(\w+)"?\s+ENABLE ROW LEVEL SECURITY/gi)) {
       (out[m[1]] ??= { enabled: false, commands: new Set() }).enabled = true;
     }
@@ -138,13 +186,14 @@ export function rlsFromMigrations(root) {
     // loosely for " ON " found it inside names like "Coaches can manage fields on own templates"
     // and invented tables called `own` and `published`.
     for (const m of sql.matchAll(
-      /CREATE POLICY\s+(?:IF NOT EXISTS\s+)?(?:"[^"]*"|\w+)\s+ON\s+(?:public\.)?"?(\w+)"?([\s\S]{0,200}?);/gi,
+      /CREATE POLICY\s+(?:IF NOT EXISTS\s+)?(?:"[^"]*"|\w+)\s+ON\s+(?:public\.)?"?(\w+)"?([\s\S]*?);/gi,
     )) {
       const entry = (out[m[1]] ??= { enabled: false, commands: new Set() });
       const cmd = /\bFOR\s+(ALL|SELECT|INSERT|UPDATE|DELETE)\b/i.exec(m[2]);
       entry.commands.add(cmd ? cmd[1].toLowerCase() : "all");
     }
   }
+  for (const name of dropped) delete out[name];
   return out;
 }
 
@@ -184,7 +233,12 @@ export function extractResources(root) {
   const appHits = tableRefs(join(root, "src"), tables);
   const fnDir = join(root, "supabase/functions");
   const fnHits = existsSync(fnDir)
-    ? tableRefs(fnDir, tables, { label: (f) => f.slice(fnDir.length + 1).split("/")[0] })
+    ? tableRefs(fnDir, tables, {
+        // `_shared/` is helper modules, not a function; naming it as a consumer both invented one
+        // and hid the real callers.
+        label: (f) => f.slice(fnDir.length + 1).split("/")[0],
+        skip: (name) => name.startsWith("_"),
+      })
     : {};
   const rls = rlsFromMigrations(root);
 

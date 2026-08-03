@@ -293,7 +293,7 @@ describe("resources", () => {
       mkdirSync(join(root, rel, ".."), { recursive: true });
       writeFileSync(join(root, rel), text, "utf8");
     };
-    put("src/lib/airtable.ts", 'export const TABLES = {\n  PEOPLE: "People",\n}\n');
+    put("src/lib/content.ts", 'export const TABLES = {\n  PEOPLE: "People",\n  // REMOVED: GHOSTS: "Ghosts",\n}\n');
     put(
       "src/integrations/supabase/types.ts",
       `    Tables: {\n      journal_entries: {\n        Row: {}\n      }\n      projects: {\n        Row: {}\n      }\n    }\n    Views: {\n`,
@@ -308,11 +308,71 @@ describe("resources", () => {
     put(
       "supabase/migrations/0001_init.sql",
       `ALTER TABLE public.ghost_table ENABLE ROW LEVEL SECURITY;\n` +
-        `CREATE POLICY "Coaches manage fields on own templates" ON public.ghost_table\n  FOR SELECT USING (true);\n`,
+        `CREATE POLICY "Coaches manage fields on own templates" ON public.ghost_table\n  FOR SELECT USING (true);\n` +
+        `-- CREATE POLICY "commented" ON public.never_real FOR SELECT USING (true);\n` +
+        `ALTER TABLE public.retired ENABLE ROW LEVEL SECURITY;\n` +
+        `CREATE POLICY "p" ON public.retired\n  FOR ALL USING (\n    ${"x".repeat(300)}\n  );\n`,
     );
+    put("supabase/migrations/0002_drop.sql", "DROP TABLE IF EXISTS public.retired;\n");
+    put("supabase/functions/_shared/util.ts", 'await admin.from("ghost_table").select()');
     put("supabase/functions/send-sms/index.ts", 'await admin.from("ghost_table").insert({})');
     return root;
   };
+
+  test("a dropped table is not a resource", () => {
+    // `companies` was dropped eight migrations back, survived as a row with full CRUD policies,
+    // and was published as a headline finding. Migrations replay in order; a DROP retires it.
+    const root = dataRepo();
+    run(root);
+    assert.ok(!rows(root, "resources").retired, "a dropped table is still on the map");
+  });
+
+  test("a commented-out policy does not invent a table", () => {
+    const root = dataRepo();
+    run(root);
+    assert.ok(!rows(root, "resources")["never-real"], "invented a table from a SQL comment");
+  });
+
+  test("a commented-out legacy table is not a table", () => {
+    const root = dataRepo();
+    run(root);
+    assert.ok(!rows(root, "resources").ghosts, "invented a table from a commented TABLES entry");
+  });
+
+  test("does not name a helper directory as an edge function", () => {
+    // `_shared/` is helper modules. Naming it invented a consumer and hid the real ones.
+    const root = dataRepo();
+    run(root);
+    assert.ok(
+      !rows(root, "resources")["ghost-table"].used_by.includes("_shared"),
+      "_shared reported as an edge function",
+    );
+  });
+
+  test("reads a policy longer than the old 200-character window", () => {
+    // The parser gave up after 200 chars, so 9 tables read `rls: []` while holding live policies —
+    // the field most likely to be read as a security fact, understating access.
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    mkdirSync(join(root, "supabase/migrations"), { recursive: true });
+    writeFileSync(
+      join(root, "supabase/migrations/0001.sql"),
+      `ALTER TABLE public.wide ENABLE ROW LEVEL SECURITY;\n` +
+        `CREATE POLICY "p" ON public.wide\n  FOR UPDATE USING (\n    ${"y".repeat(300)}\n  );\n`,
+    );
+    run(root);
+    assert.deepEqual(rows(root, "resources").wide.rls, ["update"]);
+  });
+
+  test("does not count the registry's own declaration as a read", () => {
+    // `TABLES.PEOPLE` inside resource-registry.ts is a declaration. Counting it marked five
+    // tables the app never touches as reached, contradicting their own `unused` note.
+    const root = dataRepo();
+    // Alpha.tsx is what actually reads TABLES.PEOPLE in this fixture; remove it and only the
+    // registry mentions the table.
+    writeFileSync(join(root, "src/pages/Alpha.tsx"), "export default function Alpha(){}");
+    run(root);
+    assert.equal(rows(root, "resources").people.reached_from_src, "false");
+  });
 
   test("reconciles the sources into one row per resource", () => {
     const root = dataRepo();
