@@ -8,7 +8,7 @@ No scripts to install, no CLI, no config, no assumptions about your project's sh
 ## Install
 
 ```bash
-/plugin marketplace add marktiderman/genesis
+/plugin marketplace add marktiderman/genesis-plugin
 ```
 
 ```bash
@@ -33,7 +33,7 @@ Add to the project's `.claude/settings.json` so it's on by default for anyone wh
 ```json
 {
   "extraKnownMarketplaces": {
-    "genesis": { "source": { "source": "github", "repo": "marktiderman/genesis" } }
+    "genesis": { "source": { "source": "github", "repo": "marktiderman/genesis-plugin" } }
   },
   "enabledPlugins": { "genesis@genesis": true }
 }
