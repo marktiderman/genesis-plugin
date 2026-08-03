@@ -18,8 +18,10 @@
  *
  * Node built-ins only, no dependencies.
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, join, relative, resolve } from "node:path";
+
+import { readFrontmatter, yamlList, yamlScalar } from "./lib/frontmatter.js";
 
 const HELP = `cartography — map a codebase into gitdata rows
 
@@ -34,7 +36,12 @@ Never touches: <root>/data/features/*
 
 // ── tiny helpers ────────────────────────────────────────────────────────────────
 const uniq = (a) => [...new Set(a)];
-const yamlList = (a) => `[${a.join(", ")}]`;
+
+/** What counts as a verb on a screen. A convention, named here so it is visible and changeable. */
+const AFFORDANCE_SUFFIXES = ["Form", "Dialog", "Sheet", "Panel", "Modal"];
+
+/** Components that hold a route but are not a screen: chrome, guards, redirects. */
+const NOT_A_SCREEN = /^(Navigate|Legacy)|(?:ScopeResolver|Layout|Guard|Provider|Boundary)$/;
 
 /** Minimal glob: `**` spans separators, `*` does not. Enough for `owns:` path patterns. */
 function globToRe(glob) {
@@ -61,7 +68,7 @@ const matchesAny = (path, globs) => globs.some((g) => globToRe(g).test(path));
  * to say which scopes a screen is reachable in.
  */
 function routeSections(appSrc) {
-  const marks = [...appSrc.matchAll(/<Route\s+path="([a-z]{1,2})\/:(\w+)"/g)].map((m) => ({
+  const marks = [...appSrc.matchAll(/<Route\s+path="\/?([a-z]{1,2})\/:(\w+)"/g)].map((m) => ({
     scope: { c: "client", t: "team", p: "project", pd: "product" }[m[1]] ?? m[1],
     at: m.index,
   }));
@@ -74,22 +81,60 @@ function routeSections(appSrc) {
   return out;
 }
 
+/**
+ * The opening `<Route ...>` tag of every route in a section.
+ *
+ * Scanned to the first `>` at brace depth zero rather than matched as a shape, because a route
+ * written across several lines is still one route. Matching `element={<` as a literal missed
+ * `/auth` entirely — the app's own front door — for no reason but a newline, and the map read as
+ * if the screen did not exist.
+ */
+function routeTags(section) {
+  const tags = [];
+  for (const m of section.matchAll(/<Route\b/g)) {
+    let depth = 0;
+    for (let i = m.index; i < section.length; i++) {
+      const c = section[i];
+      if (c === "{") depth++;
+      else if (c === "}") depth--;
+      else if (c === ">" && depth === 0) {
+        tags.push(section.slice(m.index, i));
+        break;
+      }
+    }
+  }
+  return tags;
+}
+
+/** The contents of the balanced `{...}` beginning at `open`. */
+function braced(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === "{") depth++;
+    else if (text[i] === "}" && --depth === 0) return text.slice(open + 1, i);
+  }
+  return text.slice(open + 1);
+}
+
 function extractRoutes(root) {
   const appPath = join(root, "src/App.tsx");
   if (!existsSync(appPath)) throw new Error(`no src/App.tsx under ${root}`);
-  const src = readFileSync(appPath, "utf8");
+  // A commented-out route is not a route. `{/* ... */}` is the only comment form that can wrap one.
+  const src = readFileSync(appPath, "utf8").replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, "");
   const found = [];
   for (const [scope, section] of Object.entries(routeSections(src))) {
-    // A route's element may be wrapped by a guard (`<AdminGuard><AdminDashboard /></AdminGuard>`).
-    // The screen is the innermost component; taking the outer one collapses every guarded page
-    // into a single row named after the guard.
-    for (const m of section.matchAll(
-      /<Route\s+(?:path="([^"]*)"|index)\s+element=\{<(\w+)[^>]*>\s*(?:<(\w+))?/g,
-    )) {
-      const [, path, outer, inner] = m;
-      const component = inner ?? outer;
-      if (/^(Navigate|Legacy)/.test(component) || /ScopeResolver$/.test(component)) continue;
-      found.push({ scope, path: path ?? "", component });
+    for (const tag of routeTags(section)) {
+      const at = tag.indexOf("element={");
+      if (at === -1) continue; // a pathless grouping route, or the data-router `Component=` form
+      // The element may be wrapped in guards and providers (`<AdminGuard><AdminHome /></AdminGuard>`).
+      // The screen is the innermost component — the last one opened — since taking an outer one
+      // collapses every guarded page into a single row named after the guard.
+      const opened = [...braced(tag, at + "element=".length).matchAll(/<(\w+)/g)].map((m) => m[1]);
+      const component = opened.at(-1);
+      if (!component || NOT_A_SCREEN.test(component)) continue;
+      const path = (tag.match(/\bpath="([^"]*)"/) || [])[1];
+      if (path === undefined && !/\bindex\b/.test(tag)) continue;
+      found.push({ scope, path: (path ?? "").replace(/^\//, ""), component });
     }
   }
   return found;
@@ -120,8 +165,13 @@ function componentFacts(root, component) {
     const p = join(root, dir, `${component}.tsx`);
     if (!existsSync(p)) continue;
     const src = readFileSync(p, "utf8");
+    // Every specifier in the braces, not just the first: `import { CreateHabitForm, LogHabitForm }`
+    // previously yielded only CreateHabitForm, dropping the core verb of the habits screen.
     const affordances = uniq(
-      [...src.matchAll(/import\s+\{?\s*(\w*(?:Form|Dialog|Sheet|Panel))\b/g)].map((m) => m[1]),
+      [...src.matchAll(/import\s+(?:\w+\s*,\s*)?\{([^}]*)\}\s*from/g)]
+        .flatMap((m) => m[1].split(","))
+        .map((sp) => sp.trim().split(/\s+as\s+/)[0].trim())
+        .filter((n) => AFFORDANCE_SUFFIXES.some((suf) => n.endsWith(suf))),
     ).sort();
     const genesis = /@marktiderman\/genesis/.test(src);
     const local = /@\/components\/(data|ui)\b/.test(src);
@@ -141,12 +191,19 @@ function extractSurfaces(root) {
   for (const { scope, path, component } of extractRoutes(root)) {
     if (!byComponent.has(component)) byComponent.set(component, { component, routes: {}, scopes: [] });
     const s = byComponent.get(component);
-    s.routes[scope] = path === "" ? "(index)" : path;
+    // A component can mount at several paths in one scope (/profile and /profile/:id). Keeping
+    // only the last silently lost the shorter, canonical one.
+    (s.routes[scope] ??= []).push(path === "" ? "(index)" : path);
     s.scopes.push(scope);
   }
   return [...byComponent.values()]
     .map((s) => {
-      const suffix = s.routes.personal ?? Object.values(s.routes)[0];
+      // The canonical mount is the shortest path in the primary scope: /profile, not
+      // /profile/:id. Sorting makes the nav lookup deterministic instead of insertion-ordered.
+      const primary = (s.routes.personal ?? Object.values(s.routes)[0] ?? []).slice().sort(
+        (a, b) => a.length - b.length || a.localeCompare(b),
+      );
+      const suffix = primary[0];
       const n = nav[suffix === "(index)" ? "" : suffix] ?? {};
       return {
         id: s.component.replace(/Page$/, "").replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase(),
@@ -161,18 +218,41 @@ function extractSurfaces(root) {
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
+/**
+ * Ids become filenames, so a collision overwrites a row — and because the drift map is keyed by
+ * the same id, the check cannot see the loss either. Two apps in a monorepo each with a
+ * SettingsPage collide on the first run, so this fails loudly rather than losing a screen.
+ */
+function assertUniqueIds(surfaces) {
+  const seen = new Map();
+  for (const s of surfaces) {
+    if (seen.has(s.id)) {
+      throw new Error(
+        `duplicate surface id "${s.id}" from ${seen.get(s.id)} and ${s.component} — ` +
+          `ids become filenames, so one row would silently overwrite the other`,
+      );
+    }
+    seen.set(s.id, s.component);
+  }
+  return surfaces;
+}
+
 const surfaceRow = (s) =>
   `---
-id: ${s.id}
+id: ${yamlScalar(s.id)}
 kind: surface
-title: ${s.title}
-component: ${s.component}
-file: ${s.file ?? "null"}
-routes: ${yamlList(Object.entries(s.routes).sort().map(([k, v]) => `${k}=${v}`))}
+title: ${yamlScalar(s.title)}
+component: ${yamlScalar(s.component)}
+file: ${yamlScalar(s.file)}
+routes: ${yamlList(
+    Object.entries(s.routes)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .flatMap(([scope, paths]) => paths.slice().sort().map((p) => `${scope}=${p}`)),
+  )}
 scopes: ${yamlList(s.scopes)}
-group: ${s.group ?? "null"}
-role: ${s.role ?? "null"}
-layout: ${s.layout}
+group: ${yamlScalar(s.group)}
+role: ${yamlScalar(s.role)}
+layout: ${yamlScalar(s.layout)}
 affordances: ${yamlList(s.affordances)}
 ---
 
@@ -187,12 +267,14 @@ function readFeatures(root) {
   return readdirSync(dir)
     .filter((f) => f.endsWith(".md") && !f.startsWith("_") && f.toLowerCase() !== "readme.md")
     .map((f) => {
-      const src = readFileSync(join(dir, f), "utf8");
-      const fm = (src.match(/^---\n([\s\S]*?)\n---/) || [])[1] ?? "";
-      const owns = (fm.match(/^owns:\s*\[([^\]]*)\]/m) || [])[1] ?? "";
+      const fm = readFrontmatter(readFileSync(join(dir, f), "utf8"), { file: `features/${f}` });
+      const owns = fm.owns ?? [];
       return {
-        id: (fm.match(/^id:\s*(\S+)/m) || [])[1] ?? basename(f, ".md"),
-        owns: owns.split(",").map((g) => g.trim().replace(/^["']|["']$/g, "")).filter(Boolean),
+        id: fm.id ?? basename(f, ".md"),
+        // `owns:` absent and `owns: []` are different claims: one is unfinished, the other says
+        // "this feature owns no code yet". Only the first should be reported as a mistake.
+        declaresOwns: "owns" in fm,
+        owns: Array.isArray(owns) ? owns : [owns].filter(Boolean),
       };
     });
 }
@@ -201,18 +283,37 @@ function report(root, surfaces) {
   const features = readFeatures(root);
   const claimed = (file) => features.filter((f) => file && matchesAny(file, f.owns)).map((f) => f.id);
   const unclaimed = surfaces.filter((s) => claimed(s.file).length === 0);
+  // A feature owning only code cartography does not extract (an edge function, a shared hook) is
+  // not dead — this tool simply cannot see it. Reporting it would be a permanent false positive
+  // that no action can clear, so only globs pointing INTO an extracted area are judged.
+  const extractedDirs = uniq(surfaces.map((s) => s.file?.split("/").slice(0, 2).join("/")).filter(Boolean));
+  const looksExtractable = (g) => extractedDirs.some((d) => g.startsWith(d));
   const dead = features.filter(
-    (f) => f.owns.length > 0 && !surfaces.some((s) => s.file && matchesAny(s.file, f.owns)),
+    (f) =>
+      f.owns.length > 0 &&
+      f.owns.some(looksExtractable) &&
+      !surfaces.some((s) => s.file && matchesAny(s.file, f.owns)),
   );
   return { unclaimed, dead, features };
 }
 
 // ── commands ────────────────────────────────────────────────────────────────────
+/**
+ * Rewrite the table: rows are replaced wholesale so a deleted screen's row disappears, but
+ * anything gitdata reserves as a non-row is left alone.
+ *
+ * The previous version was `rmSync` on the directory, which deleted the table's own README.md,
+ * _template.md and .gitkeep — the files gitdata's `isRowFile` explicitly protects — and then
+ * reported them as removed surfaces. A machine-owned table could not be documented in the
+ * gitdata idiom, and an empty table vanished on clone.
+ */
 function writeSurfaces(root, surfaces) {
   const dir = join(root, "data/surfaces");
-  // Rewritten wholesale so a deleted screen's row disappears rather than lingering.
-  rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
+  const isRow = (f) => f.endsWith(".md") && !f.startsWith("_") && f.toLowerCase() !== "readme.md";
+  for (const f of readdirSync(dir)) {
+    if (isRow(f) && statSync(join(dir, f)).isFile()) rmSync(join(dir, f));
+  }
   for (const s of surfaces) writeFileSync(join(dir, `${s.id}.md`), surfaceRow(s), "utf8");
 }
 
@@ -287,7 +388,7 @@ try {
     console.log(HELP);
     process.exit(command ? 1 : 0);
   }
-  const surfaces = extractSurfaces(root);
+  const surfaces = assertUniqueIds(extractSurfaces(root));
   const d = diff(root, surfaces);
   const r = report(root, surfaces);
 
@@ -297,6 +398,14 @@ try {
     process.exit(findings > 0 ? 1 : 0);
   }
 
+  const existing = committedSurfaces(root).size;
+  if (surfaces.length === 0 && existing > 0) {
+    throw new Error(
+      `extracted 0 surfaces but ${existing} row(s) are committed — refusing to empty the table.\n` +
+        `  This is what a router refactor looks like: the extractor no longer understands\n` +
+        `  src/App.tsx. Fix the extractor, or delete data/surfaces/ deliberately.`,
+    );
+  }
   writeSurfaces(root, surfaces);
   printReport(d, r, surfaces);
   if (command === "init") {

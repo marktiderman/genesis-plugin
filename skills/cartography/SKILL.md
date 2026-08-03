@@ -79,9 +79,33 @@ owns: ["src/pages/CheckIns*", "src/components/forms/CreateCheckInForm.tsx"]
 **Then it runs itself.** `check` as a pre-push hook and in CI. New screen with no owner fails
 loudly; a feature pointing at deleted code fails just as loudly.
 
+## What it cannot see
+
+Route extraction reads JSX, not a type-checked tree. It scans each `<Route>` tag to its closing
+`>` at brace depth zero, so multi-line routes and guard wrappers are handled — but these are out
+of reach, and a missing screen looks identical to a screen that does not exist:
+
+- routes declared outside `src/App.tsx`, or through the data-router `Component={Foo}` form
+- a component reached by a path built at runtime rather than written as a literal
+- `scopes` records the **URL prefix**, not who may enter. Whether a route sits inside an auth
+  guard is not extracted, so a public screen reads as prefix-less like any other.
+
+Affordances are import names ending in `Form`, `Dialog`, `Sheet`, `Panel`, or `Modal`. A dialog
+named otherwise is invisible; an import that is never rendered still counts. It is a convention
+made legible, not a call graph.
+
+Treat the map as a floor: everything in it is in the code. Not everything in the code is in it.
+
 ## Fitting another stack
 
-The extractor reads React Router in `src/App.tsx`, pages under `src/pages/`, and an optional
-`src/lib/nav-registry.ts` for groups and labels. It degrades when those are absent rather than
-failing. A different router means a different `extractRoutes` — that function is the seam, and it
-is the only stack-specific part.
+Four functions read this stack, and all four are in one file:
+
+| function | assumes |
+| --- | --- |
+| `routeSections` | scope prefixes declared as `<Route path="c/:id">` |
+| `extractRoutes` | React Router JSX in `src/App.tsx` |
+| `componentFacts` | pages under `src/pages/` or `src/components/`, ES import syntax |
+| `navFacts` | an optional `src/lib/nav-registry.ts` for groups and labels |
+
+Everything downstream — the two-table split, the `owns:` join, the drift check — is stack-agnostic.
+`navFacts` and `routeSections` degrade to empty when their inputs are absent; the other two do not.
