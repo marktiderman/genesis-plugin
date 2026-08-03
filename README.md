@@ -1,9 +1,10 @@
 # Genesis
 
-Surgical, portable process skills for agent-built software.
+Surgical, portable skills for agent-built software.
 
 Small skills that do one thing, work in any repository, and make no assumptions about your
-project's shape. Most depend on nothing but the model.
+project's shape. Some are pure instruction; some bundle a script. Neither needs installing — a
+skill's `scripts/` directory travels with the plugin.
 
 ## Install
 
@@ -42,25 +43,33 @@ Add to the project's `.claude/settings.json` so it's on by default for anyone wh
 
 ## The standard
 
-Every skill here has to earn its place against four rules. They exist because the alternative —
+Every skill here has to earn its place against five rules. They exist because the alternative —
 skills accreting until nobody knows what's in the box — is the failure mode this repo was built
 to escape.
 
 1. **Runs anywhere.** No dependency on this or any other repository's layout, data, or conventions.
    Proven by running it in a repo that knows nothing about Genesis, not by reading it and assuming.
-2. **Nothing to install.** No binaries, no MCP servers, no `gh`, no package manager. If a skill
-   needs a toolchain set up before it works, it belongs somewhere else.
-3. **Under ~60 lines.** Longer means it's doing more than one thing. Split it or cut it.
-4. **One clear purpose**, with a description that says exactly when to invoke it.
+2. **Nothing to install.** No binaries, no MCP servers, no `gh`, no package manager. A bundled
+   script counts as nothing to install — it ships with the plugin — provided it uses only the
+   runtime's built-ins. The moment it needs a dependency tree, it belongs somewhere else.
+3. **A bundled script is for extraction or verification** — work a model shouldn't redo by hand
+   every run, or be trusted to redo identically. It ships with fixture tests that run in CI, and
+   its SKILL.md states plainly what the script cannot see. A tool that quietly misses things is
+   worse than no tool, and only the author knows where the edges are.
+4. **Under ~60 lines of instruction.** Longer means it's doing more than one thing. Split it or cut
+   it. Documenting a script's limits doesn't count against this — that text is a warning label.
+5. **One clear purpose**, with a description that says exactly when to invoke it.
 
-A skill that can't pass all four doesn't go in.
+A skill that can't pass all five doesn't go in.
 
-**One exception, and it costs more.** A skill may ship a script when the work is extraction or
-verification — things a model should not redo by hand every run, and should not be trusted to redo
-identically. `cartography` is the only one. It buys the exception at a higher price: Node built-ins
-only, tests in CI, and a written account of what it cannot see. Rules 1 and 4 still bind; a longer
-SKILL.md is allowed only for documenting the script's limits, because an extractor that quietly
-misses things is worse than no extractor.
+Invoke a bundled script by plugin root, never by a repo-relative path:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/skills/<skill>/scripts/<script>.mjs"
+```
+
+`${CLAUDE_PLUGIN_ROOT}` resolves anywhere in skill content. A relative path works only when the
+cwd happens to be this repo, which it never is once the plugin is installed.
 
 ## Contributing
 
