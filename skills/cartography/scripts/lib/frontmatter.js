@@ -117,13 +117,34 @@ export function readFrontmatter(text, { file = "<string>" } = {}) {
       continue;
     }
     if (value === "") {
-      // Possibly a block sequence: consume the following `- item` lines.
+      // Possibly a block sequence. Blank lines and comments may precede and separate the items —
+      // requiring the very next line to be an item meant `owns:` followed by a comment parsed as
+      // empty, so the feature claimed nothing AND was exempt from the dead-feature check. That is
+      // the exact both-directions-invisible failure this reader exists to prevent.
       const items = [];
-      while (i + 1 < lines.length && /^\s*-\s+/.test(lines[i + 1])) {
-        items.push(scalar(lines[++i].replace(/^\s*-\s+/, ""), file));
+      let j = i;
+      while (j + 1 < lines.length) {
+        const next = lines[j + 1];
+        if (/^\s*-\s+/.test(next)) {
+          items.push(scalar(next.replace(/^\s*-\s+/, ""), file));
+          j++;
+          continue;
+        }
+        if (next.trim() === "" || next.trimStart().startsWith("#")) {
+          j++;
+          continue;
+        }
+        break;
       }
+      if (items.length) i = j;
       out[key] = items.length ? items : "";
       continue;
+    }
+    if (value === ">" || value === "|" || /^[>|][-+\d]*$/.test(value)) {
+      throw new FrontmatterError(
+        `${file}: block scalar (${key}: ${value}) is outside this reader's subset — ` +
+          `use a quoted single-line value`,
+      );
     }
     out[key] = scalar(value, file);
   }

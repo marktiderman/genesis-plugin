@@ -153,6 +153,82 @@ describe("extraction", () => {
     assert.deepEqual(rows(root)["not-found"].scopes, ["personal"]);
   });
 
+  test("reads nav facts per scope, so a coach-only screen is not recorded as open", () => {
+    // One flat map keyed by suffix kept whichever scope the registry listed last. /engagements is
+    // gated to coaches in personal scope and open in client scope; the row said open.
+    const nav = `
+      const NAV = [
+        { id: "engagements", suffix: "engagements", title: "Engagements", group: "practice", scopes: ["personal"], role: "coach" },
+        { id: "projects", suffix: "projects", suffixByScope: { personal: "p" }, title: "Projects", group: "execution", scopes: ["personal", "client"] },
+      ];
+      const CLIENT_NAV = [
+        { id: "c-engagements", suffix: "engagements", title: "Engagements", group: "tracking", scopes: ["client"] },
+      ];`;
+    const root = repo(
+      `<Route path="engagements" element={<Engagements />} />\n` +
+        `<Route path="p" element={<Projects />} />\n` +
+        `<Route path="c/:clientId" element={<ClientScopeResolver />}>\n` +
+        `  <Route path="engagements" element={<Engagements />} />\n` +
+        `</Route>`,
+      { Engagements: "", Projects: "" },
+    );
+    mkdirSync(join(root, "src/lib"), { recursive: true });
+    writeFileSync(join(root, "src/lib/nav-registry.ts"), nav);
+    run(root);
+    assert.deepEqual(rows(root).engagements.role, ["personal=coach"], "the gate was dropped");
+    assert.deepEqual(rows(root).engagements.group, ["client=tracking", "personal=practice"]);
+    // suffixByScope means this entry answers to "p" in personal scope, not "projects".
+    assert.deepEqual(rows(root).projects.group, ["personal=execution"]);
+  });
+
+  test("ignores routes inside line comments, block comments, and strings", () => {
+    const root = repo(
+      `{/* <Route path="jsx" element={<JsxGone />} /> */}\n` +
+        `/* <Route path="block" element={<BlockGone />} /> */\n` +
+        `// <Route path="line" element={<LineGone />} />\n` +
+        `<Route path="a" element={<Alpha />} />`,
+      { Alpha: "", JsxGone: "", BlockGone: "", LineGone: "" },
+    );
+    run(root);
+    assert.deepEqual(Object.keys(rows(root)), ["alpha"]);
+  });
+
+  test("is not desynced by a brace inside an attribute string", () => {
+    // The brace counter dropped this route and, on a resolver, refiled its children — exit 0 both.
+    const root = repo(
+      `<Route path="t/:teamId" element={<TeamScopeResolver label="a{b" />}>\n` +
+        `  <Route path="rocks" element={<Rocks />} />\n` +
+        `</Route>\n` +
+        `<Route path="x" element={<Xx title="y{z" />} />`,
+      { Rocks: "", Xx: "" },
+    );
+    run(root);
+    assert.deepEqual(rows(root).rocks.scopes, ["team"], "children fell out of their scope");
+    assert.ok(rows(root).xx, "a route with a braced string in an attribute went missing");
+  });
+
+  test("finds a routed component in a nested directory", () => {
+    const root = repo(`<Route path="b" element={<Billing />} />`);
+    mkdirSync(join(root, "src/components/settings"), { recursive: true });
+    writeFileSync(
+      join(root, "src/components/settings/Billing.tsx"),
+      `import { CreatePlanForm } from "@/components/forms/PlanForms";`,
+    );
+    run(root);
+    assert.equal(rows(root).billing.file, "src/components/settings/Billing.tsx");
+    assert.deepEqual(rows(root).billing.affordances, ["CreatePlanForm"]);
+  });
+
+  test("counts only the app's own components as verbs, not design-system primitives", () => {
+    const root = repo(`<Route path="j" element={<Journal />} />`, {
+      Journal:
+        `import { Dialog, AlertDialog } from "@marktiderman/genesis-ui";\n` +
+        `import { CreateEntryForm } from "@/components/forms/EntryForm";`,
+    });
+    run(root);
+    assert.deepEqual(rows(root).journal.affordances, ["CreateEntryForm"]);
+  });
+
   test("does not file chrome as a screen", () => {
     // The root route's element is the layout shell. It holds a path but is not somewhere you go.
     const root = repo(
@@ -178,8 +254,10 @@ describe("destructive operations", () => {
     assert.equal(Object.keys(rows(root)).length, 1, "rows must survive a failed extraction");
   });
 
-  test("preserves the table's own README and template", () => {
-    // rmSync on the directory deleted exactly the files gitdata reserves as non-rows.
+  test("preserves the table's own README and template, and does not report them as gone", () => {
+    // Two definitions of "row" disagreed: writeSurfaces preserved these files, diff counted them.
+    // So every run reported them `- gone`, check exited 1 forever, and `sync` — the fix the
+    // failure prints — could not clear it. Documenting the table was enough to break the gate.
     const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
     run(root);
     const dir = join(root, "data/surfaces");
@@ -188,6 +266,10 @@ describe("destructive operations", () => {
     run(root);
     assert.ok(existsSync(join(dir, "README.md")), "README.md was deleted");
     assert.ok(existsSync(join(dir, "_template.md")), "_template.md was deleted");
+
+    const check = run(root, "check");
+    assert.doesNotMatch(check.out, /gone/, "a preserved non-row must not read as a deleted screen");
+    assert.equal(check.code, 0, "the gate must be clearable");
   });
 
   test("fails on a duplicate id instead of overwriting a row", () => {
@@ -235,15 +317,47 @@ describe("the owns join", () => {
     assert.equal(stale.code, 1, "a map that no longer matches the code must fail");
   });
 
+  test("expands a brace glob instead of matching it literally", () => {
+    // The frontmatter test calls this "the realistic case" and only checks the splitter. The glob
+    // matched nothing, so copying that example produced a red gate no sync could clear.
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    run(root);
+    mkdirSync(join(root, "data/features"), { recursive: true });
+    writeFileSync(
+      join(root, "data/features/F-1--x.md"),
+      `---\nid: F-1\nowns: ["src/pages/{Alpha,Beta}.tsx"]\n---\n\n## The job\n\nx\n`,
+    );
+    run(root);
+    assert.deepEqual(rows(root).alpha.claimed_by, ["F-1"]);
+    assert.equal(run(root, "check").code, 0);
+  });
+
+  test("reads a block owns: list that starts after a comment or a blank line", () => {
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    run(root);
+    mkdirSync(join(root, "data/features"), { recursive: true });
+    writeFileSync(
+      join(root, "data/features/F-1--x.md"),
+      `---\nid: F-1\nowns:\n  # the alpha surface\n\n  - src/pages/Alpha.tsx\n---\n\n## The job\n\nx\n`,
+    );
+    run(root);
+    assert.deepEqual(rows(root).alpha.claimed_by, ["F-1"], "the claim was silently dropped");
+  });
+
   test("does not report a feature owning code this extractor cannot see", () => {
     // `owns: [supabase/functions/**]` is a real claim about real code. Reporting it as dead is a
     // permanent false positive no action can clear.
     const r = run(withFeature('owns: ["supabase/functions/**"]'), "check");
     assert.doesNotMatch(r.out, /owns nothing/);
+    // Asserting the absence of a string also passes when the tool crashes, so pin the exit code
+    // and one positive fact: this test used to survive `throw` at the top of report().
+    assert.equal(r.code, 0);
+    assert.match(r.out, /surface\(s\) extracted/);
   });
 
   test("still reports a feature whose globs point into extracted territory and match nothing", () => {
     const r = run(withFeature('owns: ["src/pages/Deleted.tsx"]'), "check");
     assert.match(r.out, /owns nothing/);
+    assert.equal(r.code, 1, "a feature pointing at deleted code must fail the gate");
   });
 });

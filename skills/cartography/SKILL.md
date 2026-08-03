@@ -30,7 +30,10 @@ wherever it landed. It needs Node and a git checkout; that is all.
 | table | owner | on every run |
 | --- | --- | --- |
 | `data/surfaces/` | machine | rows deleted and rewritten wholesale |
-| `data/features/` | human | read for its `owns:` globs, never written |
+| `data/features/` | human | read for its `owns:` globs; **no row is ever written** |
+
+(`init` may create `data/features/_inventory.md` once, if absent. It is a `_`-prefixed draft, not a
+row, and no later run touches it.)
 
 They join through `owns:` globs on a feature — declared by a person, evaluated by the machine. The
 result lands back on the surface as `claimed_by`, so who claims a screen is a committed fact rather
@@ -65,7 +68,7 @@ wearing a product's clothes. Name the job first; attach screens to it with `owns
 | mark | finding | exit |
 | --- | --- | --- |
 | `+` `-` `~` | a screen appeared, vanished, or changed scope/route/layout | 1 |
-| `!` | a feature whose globs match nothing — renamed or deleted code | 1 |
+| `!` | a feature whose globs match nothing **in a directory this tool extracts** | 1 |
 | `?` | a screen no feature's `owns:` glob claims | 0 |
 
 The committed rows are the baseline; `check` compares a fresh extraction against them.
@@ -107,13 +110,25 @@ of reach, and a missing screen looks identical to a screen that does not exist:
 - routes declared outside `src/App.tsx`, or through the data-router `Component={Foo}` form
 - a component reached by a path built at runtime rather than written as a literal
 - `scopes` records the **URL prefix**, not who may enter. Whether a route sits inside an auth
-  guard is not extracted, so a public screen reads as prefix-less like any other.
+  guard is not extracted, so the sign-in page and the catch-all 404 read as prefix-less like any
+  personal screen. Do not read `personal` as "shows a person's own data".
+- a component named `Navigate`, or ending `Layout`, `Guard`, `Provider`, `Boundary`, `Redirect` or
+  `ScopeResolver`, is treated as chrome and omitted. A real screen named that way is omitted too.
+- `!` is withheld for globs pointing outside the directories it extracts from. A feature owning
+  only an edge function is not dead, and reporting it would be a false positive nothing can clear.
 
-Affordances are import names ending in `Form`, `Dialog`, `Sheet`, `Panel`, or `Modal`. A dialog
-named otherwise is invisible; an import that is never rendered still counts. It is a convention
-made legible, not a call graph.
+Affordances are import names ending in `Form`, `Dialog`, `Sheet`, `Panel`, or `Modal`, taken from
+the app's own modules — a design system's `Dialog` primitive is not a verb. A dialog named
+otherwise is invisible; an import that is never rendered still counts. It is a convention made
+legible, not a call graph.
+
+`group` and `role` are scope-tagged lists, not single values, because a screen can be grouped
+differently and gated differently depending on the scope it is reached in. An app whose nav
+subdivides a URL scope (one `/t/` prefix, three kinds of team) is reported in the nav's own words.
 
 Treat the map as a floor: everything in it is in the code. Not everything in the code is in it.
+
+Needs Node 18 or newer.
 
 ## Fitting another stack
 
