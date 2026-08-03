@@ -1,0 +1,32 @@
+.claude-plugin/marketplace.json
+  s_e1fe64bacdd74f::t_f9fa08e6520aac 1-18
+README.md
+  s_e1fe64bacdd74f::t_3c3eded7a7058f 1-64
+LICENSE
+  s_e1fe64bacdd74f::t_7dc63b27300335 1-21
+skills/align/SKILL.md
+  s_e1fe64bacdd74f::t_d5e606d9cc6ec3 1-44
+.claude-plugin/plugin.json
+  s_e1fe64bacdd74f::t_cc99ec1eded50e 1-19
+skills/debrief/SKILL.md
+  s_e1fe64bacdd74f::t_3e459857fd0242 1-11,13-52
+  s_e1fe64bacdd74f::t_375dad94929fa0 12
+skills/one-three-one/SKILL.md
+  s_e1fe64bacdd74f::t_45c3d399a63a44 1-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "45a9f0e31b8f4a129d259d73a004fc3b2fce49f0",
+  "prompts": {},
+  "sessions": {
+    "s_e1fe64bacdd74f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4db5a991-dd4b-4f40-9446-2e58caec4a82",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Mark Tiderman <marktiderman@users.noreply.github.com>"
+    }
+  }
+}
