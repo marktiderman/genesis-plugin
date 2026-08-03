@@ -60,12 +60,9 @@ export function legacyTables(root) {
     const p = join(root, rel);
     if (!existsSync(p)) continue;
     const block = /export const TABLES\s*=\s*\{([\s\S]*?)\n\}/.exec(stripJs(readFileSync(p, "utf8")));
-    if (block) return Object.fromEntries([...block[1].matchAll(/(\w+):\s*"([^"]+)"/g)].map((m) => [m[1], m[2]]));
+    if (block) return Object.fromEntries([...block[1].matchAll(/^\s{0,4}(\w+):\s*"([^"]+)"/gm)].map((m) => [m[1], m[2]]));
   }
   return {};
-  return Object.fromEntries(
-    [...block[1].matchAll(/(\w+):\s*"([^"]+)"/g)].map((m) => [m[1], m[2]]),
-  );
 }
 
 /** Table names in the generated Supabase types — the typed half of the data plane. */
@@ -174,36 +171,78 @@ export function rlsFromMigrations(root) {
   const dir = join(root, "supabase/migrations");
   if (!existsSync(dir)) return {};
   const out = {};
-  // Migrations replay in order, so a later DROP retires a table an earlier one created. Without
-  // this, `companies` — dropped eight migrations back — survived as a row with full CRUD policies
-  // and was published as a finding.
   for (const file of readdirSync(dir).sort()) {
     if (!file.endsWith(".sql")) continue;
-    const sql = stripSql(readFileSync(join(dir, file), "utf8"));
-    // Applied where it appears, not at the end: `DROP TABLE x; CREATE TABLE x;` is the standard
-    // idempotency idiom, and retiring x globally wiped RLS off a live table — a regression in the
-    // one direction this parser must never fail, understating access.
-    for (const m of sql.matchAll(/DROP TABLE\s+(?:IF EXISTS\s+)?([^;]+)/gi)) {
-      // `DROP TABLE a, b;` drops both.
-      for (const name of m[1].split(",")) {
-        const bare = /(?:public\.)?"?(\w+)"?/.exec(name.trim());
-        if (bare) delete out[bare[1]];
+    // Statement by statement, in order. Three separate passes over one file meant a DROP was
+    // applied before the policies below it were read, so a table dropped after its own
+    // CREATE POLICY came back to life — and scanning raw text for "DROP TABLE" let the words
+    // inside a COMMENT or a quoted string delete live tables. A statement is the unit that
+    // decides both.
+    for (const stmt of sqlStatements(stripSql(readFileSync(join(dir, file), "utf8")))) {
+      const drop = /^\s*DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(.+)$/is.exec(stmt);
+      if (drop) {
+        for (const name of drop[1].split(",")) {
+          const bare = /^\s*(?:public\.)?"?([\w ]+)"?/.exec(name.replace(/\b(CASCADE|RESTRICT)\b/i, "").trim());
+          if (bare) delete out[bare[1].trim()];
+        }
+        continue;
+      }
+      const enable = /^\s*ALTER\s+TABLE\s+(?:public\.)?"?(\w+)"?[\s\S]*ENABLE\s+ROW\s+LEVEL\s+SECURITY/i.exec(stmt);
+      if (enable) {
+        (out[enable[1]] ??= { enabled: false, commands: new Set() }).enabled = true;
+        continue;
+      }
+      // The policy name is consumed as a whole quoted string before ON is looked for; scanning
+      // loosely for " ON " found it inside names like "manage fields on own templates".
+      const policy = /^\s*CREATE\s+POLICY\s+(?:IF NOT EXISTS\s+)?(?:"[^"]*"|\w+)\s+ON\s+(?:public\.)?"?(\w+)"?([\s\S]*)$/i.exec(stmt);
+      if (policy) {
+        const entry = (out[policy[1]] ??= { enabled: false, commands: new Set() });
+        const cmd = /\bFOR\s+(ALL|SELECT|INSERT|UPDATE|DELETE)\b/i.exec(policy[2]);
+        entry.commands.add(cmd ? cmd[1].toLowerCase() : "all");
       }
     }
-    for (const m of sql.matchAll(/ALTER TABLE\s+(?:public\.)?"?(\w+)"?\s+ENABLE ROW LEVEL SECURITY/gi)) {
-      (out[m[1]] ??= { enabled: false, commands: new Set() }).enabled = true;
-    }
-    // The policy name is consumed as a whole quoted string before ON is looked for. Scanning
-    // loosely for " ON " found it inside names like "Coaches can manage fields on own templates"
-    // and invented tables called `own` and `published`.
-    for (const m of sql.matchAll(
-      /CREATE POLICY\s+(?:IF NOT EXISTS\s+)?(?:"[^"]*"|\w+)\s+ON\s+(?:public\.)?"?(\w+)"?([\s\S]*?);/gi,
-    )) {
-      const entry = (out[m[1]] ??= { enabled: false, commands: new Set() });
-      const cmd = /\bFOR\s+(ALL|SELECT|INSERT|UPDATE|DELETE)\b/i.exec(m[2]);
-      entry.commands.add(cmd ? cmd[1].toLowerCase() : "all");
-    }
   }
+  return out;
+}
+
+/**
+ * Split SQL into top-level statements, stepping over string literals, quoted identifiers and
+ * dollar-quoted bodies. Without this, `DROP TABLE` written inside a COMMENT or a plpgsql body
+ * reads as a real drop.
+ */
+export function sqlStatements(sql) {
+  const out = [];
+  let buf = "";
+  for (let i = 0; i < sql.length; i++) {
+    const c = sql[i];
+    if (c === "'" || c === '"') {
+      const q = c;
+      buf += c;
+      for (i++; i < sql.length; i++) {
+        buf += sql[i];
+        if (sql[i] === q) {
+          if (sql[i + 1] === q) buf += sql[++i];
+          else break;
+        }
+      }
+      continue;
+    }
+    const tag = /^\$(\w*)\$/.exec(sql.slice(i, i + 40));
+    if (tag) {
+      const close = sql.indexOf(tag[0], i + tag[0].length);
+      const stop = close === -1 ? sql.length : close + tag[0].length;
+      buf += sql.slice(i, stop);
+      i = stop - 1;
+      continue;
+    }
+    if (c === ";") {
+      if (buf.trim()) out.push(buf);
+      buf = "";
+      continue;
+    }
+    buf += c;
+  }
+  if (buf.trim()) out.push(buf);
   return out;
 }
 

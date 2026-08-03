@@ -319,6 +319,51 @@ describe("resources", () => {
     return root;
   };
 
+  test("a table dropped below its own policies is still dropped", () => {
+    // Three passes over one file applied every DROP before any CREATE POLICY was read, so a table
+    // dropped after its policies came back to life — the same direction as the defect this whole
+    // change exists to fix, reintroduced by the fix for it.
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    mkdirSync(join(root, "supabase/migrations"), { recursive: true });
+    writeFileSync(
+      join(root, "supabase/migrations/0001.sql"),
+      `ALTER TABLE public.staging ENABLE ROW LEVEL SECURITY;\n` +
+        `CREATE POLICY "r" ON public.staging FOR SELECT USING (true);\n` +
+        `DROP TABLE public.staging;\n`,
+    );
+    run(root);
+    assert.ok(!rows(root, "resources").staging, "a dropped table came back to life");
+  });
+
+  test("the words DROP TABLE inside a string do not drop anything", () => {
+    // A COMMENT ON TABLE mentioning a drop deleted two live tables from the map — valid SQL
+    // containing no DROP statement at all, silently understating access.
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    mkdirSync(join(root, "supabase/migrations"), { recursive: true });
+    writeFileSync(
+      join(root, "supabase/migrations/0001.sql"),
+      `ALTER TABLE public.legacy_a ENABLE ROW LEVEL SECURITY;\n` +
+        `CREATE POLICY "p" ON public.legacy_a FOR ALL USING (true);\n` +
+        `COMMENT ON TABLE public.other IS 'supersedes DROP TABLE legacy_a, legacy_b';\n` +
+        `DO $$ BEGIN RAISE NOTICE 'never DROP TABLE legacy_a'; END $$;\n`,
+    );
+    run(root);
+    assert.deepEqual(rows(root, "resources")["legacy-a"].rls, ["all"]);
+  });
+
+  test("does not read a nested object's value as a table name", () => {
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    mkdirSync(join(root, "src/lib"), { recursive: true });
+    writeFileSync(
+      join(root, "src/lib/content.ts"),
+      'export const TABLES = {\n  PEOPLE: "People",\n  meta: { v: "1" },\n  WINS: "Wins",\n}\n',
+    );
+    run(root);
+    const r = rows(root, "resources");
+    assert.ok(!r["1"], "invented a table from a nested value");
+    assert.ok(r.people && r.wins, "truncated the list at the nested object");
+  });
+
   test("a table dropped and recreated keeps its RLS", () => {
     // Drop-then-create is the standard idempotency idiom. Retiring the name globally wiped RLS
     // off a live table — a regression in the one direction this must never fail.
