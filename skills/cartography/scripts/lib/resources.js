@@ -54,10 +54,15 @@ export const LEGACY_TABLE_FILES = ["src/lib/content.ts", "src/lib/airtable.ts"];
 export function legacyTables(root) {
   // The file gets renamed — this one went `airtable.ts` -> `content.ts` and the map silently lost
   // all 24 legacy tables, taking every registry declaration keyed on them along too.
-  const p = LEGACY_TABLE_FILES.map((f) => join(root, f)).find(existsSync);
-  if (!p) return {};
-  const block = /export const TABLES\s*=\s*\{([\s\S]*?)\n\s*\}/.exec(stripJs(readFileSync(p, "utf8")));
-  if (!block) return {};
+  // Chosen by content, not by existence: `content.ts` is a common filename, and picking a file
+  // that merely exists lost all 24 tables to an unrelated namesake.
+  for (const rel of LEGACY_TABLE_FILES) {
+    const p = join(root, rel);
+    if (!existsSync(p)) continue;
+    const block = /export const TABLES\s*=\s*\{([\s\S]*?)\n\}/.exec(stripJs(readFileSync(p, "utf8")));
+    if (block) return Object.fromEntries([...block[1].matchAll(/(\w+):\s*"([^"]+)"/g)].map((m) => [m[1], m[2]]));
+  }
+  return {};
   return Object.fromEntries(
     [...block[1].matchAll(/(\w+):\s*"([^"]+)"/g)].map((m) => [m[1], m[2]]),
   );
@@ -111,7 +116,7 @@ export function declaredResources(root, tables) {
       name,
       backing: /backing:\s*"(\w+)"/.exec(head)?.[1] ?? null,
       description: /description:\s*"([^"]*)"/.exec(head)?.[1] ?? null,
-      fields: fields ? [...fields.matchAll(/^\s*(?:"([^"]+)"|\[?([\w.]+)\]?):\s*"/gm)].map((m) => (m[1] ?? m[2]).trim()) : [],
+      fields: fields ? [...fields.matchAll(/^\s*(?:"([^"]+)"|([\w ]+)):\s*"/gm)].map((m) => (m[1] ?? m[2]).trim()) : [],
       scope: /scope:\s*"(\w+)"/.exec(head)?.[1] ?? (/scope:\s*\{/.test(head) ? "rule" : null),
       debt: /\bdebt:\s*true/.test(head),
     });
@@ -127,7 +132,7 @@ export function declaredResources(root, tables) {
  * every legacy table as unreached from `src/` — 24 rows saying the app never touches data it
  * touches on nearly every screen.
  */
-export function tableRefs(dir, tables, { label = (f) => f, skip = () => false } = {}) {
+export function tableRefs(dir, tables, { label = (f) => f } = {}) {
   const hits = {};
   const byKey = Object.entries(tables);
   const walk = (d) => {
@@ -140,7 +145,7 @@ export function tableRefs(dir, tables, { label = (f) => f, skip = () => false } 
     for (const e of entries) {
       const path = join(d, e.name);
       if (e.isDirectory()) {
-        if (e.name !== "node_modules" && !skip(e.name)) walk(path);
+        if (e.name !== "node_modules") walk(path);
         continue;
       }
       if (!/\.(ts|tsx)$/.test(e.name)) continue;
@@ -172,12 +177,18 @@ export function rlsFromMigrations(root) {
   // Migrations replay in order, so a later DROP retires a table an earlier one created. Without
   // this, `companies` — dropped eight migrations back — survived as a row with full CRUD policies
   // and was published as a finding.
-  const dropped = new Set();
   for (const file of readdirSync(dir).sort()) {
     if (!file.endsWith(".sql")) continue;
     const sql = stripSql(readFileSync(join(dir, file), "utf8"));
-    for (const m of sql.matchAll(/DROP TABLE\s+(?:IF EXISTS\s+)?(?:public\.)?"?(\w+)"?/gi)) {
-      dropped.add(m[1]);
+    // Applied where it appears, not at the end: `DROP TABLE x; CREATE TABLE x;` is the standard
+    // idempotency idiom, and retiring x globally wiped RLS off a live table — a regression in the
+    // one direction this parser must never fail, understating access.
+    for (const m of sql.matchAll(/DROP TABLE\s+(?:IF EXISTS\s+)?([^;]+)/gi)) {
+      // `DROP TABLE a, b;` drops both.
+      for (const name of m[1].split(",")) {
+        const bare = /(?:public\.)?"?(\w+)"?/.exec(name.trim());
+        if (bare) delete out[bare[1]];
+      }
     }
     for (const m of sql.matchAll(/ALTER TABLE\s+(?:public\.)?"?(\w+)"?\s+ENABLE ROW LEVEL SECURITY/gi)) {
       (out[m[1]] ??= { enabled: false, commands: new Set() }).enabled = true;
@@ -193,7 +204,6 @@ export function rlsFromMigrations(root) {
       entry.commands.add(cmd ? cmd[1].toLowerCase() : "all");
     }
   }
-  for (const name of dropped) delete out[name];
   return out;
 }
 
@@ -234,10 +244,11 @@ export function extractResources(root) {
   const fnDir = join(root, "supabase/functions");
   const fnHits = existsSync(fnDir)
     ? tableRefs(fnDir, tables, {
-        // `_shared/` is helper modules, not a function; naming it as a consumer both invented one
-        // and hid the real callers.
+        // `_shared/` is helper modules rather than a function, so it is an imprecise consumer
+        // label — but skipping the directory deleted the only evidence for tables reached solely
+        // through a helper, dropping those rows from the map entirely. A rough label beats a
+        // missing resource; resolving helpers to their importers is the real fix.
         label: (f) => f.slice(fnDir.length + 1).split("/")[0],
-        skip: (name) => name.startsWith("_"),
       })
     : {};
   const rls = rlsFromMigrations(root);

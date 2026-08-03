@@ -319,6 +319,69 @@ describe("resources", () => {
     return root;
   };
 
+  test("a table dropped and recreated keeps its RLS", () => {
+    // Drop-then-create is the standard idempotency idiom. Retiring the name globally wiped RLS
+    // off a live table — a regression in the one direction this must never fail.
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    mkdirSync(join(root, "supabase/migrations"), { recursive: true });
+    writeFileSync(join(root, "supabase/migrations/0001.sql"), "ALTER TABLE public.recycled ENABLE ROW LEVEL SECURITY;\n");
+    writeFileSync(
+      join(root, "supabase/migrations/0002.sql"),
+      `DROP TABLE IF EXISTS public.recycled;\nCREATE TABLE public.recycled ();\n` +
+        `ALTER TABLE public.recycled ENABLE ROW LEVEL SECURITY;\n` +
+        `CREATE POLICY "p" ON public.recycled FOR UPDATE USING (true);\n`,
+    );
+    run(root);
+    assert.deepEqual(rows(root, "resources").recycled.rls, ["update"]);
+    assert.equal(rows(root, "resources").recycled.rls_enabled, "true");
+  });
+
+  test("drops every table named in one statement", () => {
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    mkdirSync(join(root, "supabase/migrations"), { recursive: true });
+    writeFileSync(
+      join(root, "supabase/migrations/0001.sql"),
+      "ALTER TABLE public.aaa ENABLE ROW LEVEL SECURITY;\nALTER TABLE public.bbb ENABLE ROW LEVEL SECURITY;\n",
+    );
+    writeFileSync(join(root, "supabase/migrations/0002.sql"), "DROP TABLE IF EXISTS public.aaa, public.bbb;\n");
+    const r = rows((run(root), root), "resources");
+    assert.ok(!r.aaa && !r.bbb, "a multi-table DROP retired only the first");
+  });
+
+  test("keeps a table reached only through a shared helper", () => {
+    // Skipping `_shared/` deleted the only evidence for such a table, dropping the row entirely.
+    // A rough consumer label beats a missing resource.
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    mkdirSync(join(root, "supabase/functions/_shared"), { recursive: true });
+    writeFileSync(join(root, "supabase/functions/_shared/audit.ts"), 'await admin.from("audit_log").insert({})');
+    run(root);
+    assert.ok(rows(root, "resources")["audit-log"], "a helper-only table vanished from the map");
+  });
+
+  test("does not name a computed key as a field", () => {
+    // `[LEGACY_ACCOUNT_FIELD]: "relation"` names a constant, not a column. Emitting the identifier
+    // put a field called LEGACY_ACCOUNT_FIELD on 14 rows; the real column is Account.
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    mkdirSync(join(root, "src/lib"), { recursive: true });
+    writeFileSync(join(root, "src/lib/content.ts"), 'export const TABLES = {\n  P: "P",\n}\n');
+    writeFileSync(
+      join(root, "src/lib/resource-registry.ts"),
+      `const R = [defineResource({\n  name: TABLES.P,\n  backing: "jsonb",\n` +
+        `  fields: {\n    "Check-in Date": "string",\n    [ACCOUNT]: "relation",\n  },\n})];\n`,
+    );
+    run(root);
+    assert.deepEqual(rows(root, "resources").p.fields, ["Check-in Date"]);
+  });
+
+  test("picks the legacy file that defines TABLES, not merely one that exists", () => {
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    mkdirSync(join(root, "src/lib"), { recursive: true });
+    writeFileSync(join(root, "src/lib/content.ts"), "export const sanitize = (s) => s;\n");
+    writeFileSync(join(root, "src/lib/airtable.ts"), 'export const TABLES = {\n  PEOPLE: "People",\n}\n');
+    run(root);
+    assert.ok(rows(root, "resources").people, "an unrelated namesake file cost all legacy tables");
+  });
+
   test("a dropped table is not a resource", () => {
     // `companies` was dropped eight migrations back, survived as a row with full CRUD policies,
     // and was published as a headline finding. Migrations replay in order; a DROP retires it.
@@ -339,14 +402,13 @@ describe("resources", () => {
     assert.ok(!rows(root, "resources").ghosts, "invented a table from a commented TABLES entry");
   });
 
-  test("does not name a helper directory as an edge function", () => {
-    // `_shared/` is helper modules. Naming it invented a consumer and hid the real ones.
+  test("records a shared helper as a consumer rather than dropping the evidence", () => {
+    // `_shared/` is an imprecise label — it is helper modules, not a function. Skipping it to fix
+    // the label deleted the only evidence for tables reached solely through a helper, dropping
+    // those rows from the map. A rough label beats a missing resource.
     const root = dataRepo();
     run(root);
-    assert.ok(
-      !rows(root, "resources")["ghost-table"].used_by.includes("_shared"),
-      "_shared reported as an edge function",
-    );
+    assert.ok(rows(root, "resources")["ghost-table"].used_by.includes("_shared"));
   });
 
   test("reads a policy longer than the old 200-character window", () => {
@@ -396,7 +458,7 @@ describe("resources", () => {
     assert.equal(ghost.backing, "edge-only");
     assert.equal(ghost.rls_enabled, "true");
     assert.deepEqual(ghost.rls, ["select"]);
-    assert.deepEqual(ghost.used_by, ["send-sms"]);
+    assert.deepEqual(ghost.used_by, ["_shared", "send-sms"]);
     assert.equal(ghost.reached_from_src, "false");
   });
 
