@@ -15,6 +15,9 @@ No scripts to install, no CLI, no config, no assumptions about your project's sh
 /plugin install genesis@genesis
 ```
 
+Updates reach you automatically. This plugin sets no `version` field, so every commit is a new
+version — pull the latest at any time with `/plugin update genesis@genesis`.
+
 ## Skills
 
 | Skill | What it does |
