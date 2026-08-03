@@ -14,10 +14,14 @@ A codebase knows its own structure and cannot state its own purpose. Cartography
 first and refuses to guess the second.
 
 ```bash
-node skills/cartography/scripts/cartography.mjs init   --root .   # first run
-node skills/cartography/scripts/cartography.mjs sync   --root .   # re-extract, report
-node skills/cartography/scripts/cartography.mjs check  --root .   # report only, exit 1 (CI)
+CARTO="${CLAUDE_PLUGIN_ROOT}/skills/cartography/scripts/cartography.mjs"
+node "$CARTO" init  --root .   # first run
+node "$CARTO" sync  --root .   # re-extract, report
+node "$CARTO" check --root .   # report only, exit 1 on stale facts
 ```
+
+The script travels with the plugin — nothing to install, and `${CLAUDE_PLUGIN_ROOT}` resolves to
+wherever it landed. It needs Node and a git checkout; that is all.
 
 ## The rule that makes it re-runnable
 
@@ -86,8 +90,13 @@ title: Report how I'm really doing
 owns: ["src/pages/CheckIns*", "src/components/forms/CreateCheckInForm.tsx"]
 ```
 
-**Then it runs itself.** `check` as a pre-push hook and in CI. New screen with no owner fails
-loudly; a feature pointing at deleted code fails just as loudly.
+**Then it runs itself.** `check` exits non-zero the moment the committed map stops matching the
+code, so it belongs in a pre-push hook and in CI. A new screen fails until it is synced; a feature
+pointing at deleted code fails until it is fixed. A screen with no owner does not fail — it waits.
+
+A CI runner has no plugins, so `${CLAUDE_PLUGIN_ROOT}` is not there: point the build at a checkout
+of this repo, **pinned to a commit**, or a change to the extractor breaks a build that did not
+change.
 
 ## What it cannot see
 
