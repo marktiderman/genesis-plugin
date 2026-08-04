@@ -615,8 +615,15 @@ function missingSources(root) {
   );
 }
 
-/** Every file in the repo, root-relative, minus the trees no `owns:` glob is about. */
-function repoFiles(root) {
+/**
+ * Every path in the repo, root-relative, minus the trees no `owns:` glob is about.
+ *
+ * Directories appear twice, bare and with a trailing slash, because `owns: ["packages/"]` is how
+ * people write "this whole directory" and a file-only list would report that feature as owning
+ * nothing while the directory sits right there. Five of one consumer's 108 features name a
+ * directory that way.
+ */
+function repoPaths(root) {
   const skip = new Set(["node_modules", ".git", "dist", "build", ".next", "coverage"]);
   const out = [];
   const walk = (dir, prefix) => {
@@ -628,7 +635,9 @@ function repoFiles(root) {
     }
     for (const e of entries) {
       if (e.isDirectory()) {
-        if (!skip.has(e.name)) walk(join(dir, e.name), `${prefix}${e.name}/`);
+        if (skip.has(e.name)) continue;
+        out.push(prefix + e.name, `${prefix}${e.name}/`);
+        walk(join(dir, e.name), `${prefix}${e.name}/`);
       } else out.push(prefix + e.name);
     }
   };
@@ -648,8 +657,8 @@ function report(root, surfaces, features) {
   // is still not dead, and now for the honest reason: those files exist, so the globs match. The
   // old prefix heuristic reached the same verdict by guessing from where surface rows happened to
   // live, which made the false positive it was written to prevent fire inside `src/pages` itself.
-  const files = repoFiles(root);
-  const dead = features.filter((f) => f.owns.length > 0 && !files.some((p) => matchesAny(p, f.owns)));
+  const paths = repoPaths(root);
+  const dead = features.filter((f) => f.owns.length > 0 && !paths.some((p) => matchesAny(p, f.owns)));
   return { unclaimed, dead };
 }
 
