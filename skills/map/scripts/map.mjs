@@ -19,10 +19,11 @@
  *
  * Node built-ins only, no dependencies.
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 
 import { readFrontmatter, yamlList, yamlScalar } from "./lib/frontmatter.js";
+import { rowFilesIn } from "./lib/rows.js";
 import {
   RESOURCE_SOURCES,
   TYPES_FILE,
@@ -577,19 +578,22 @@ claimed_by: ${yamlList(r.claimed_by)}
 function readFeatures(root) {
   const dir = join(root, "data/features");
   if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((f) => f.endsWith(".md") && !f.startsWith("_") && f.toLowerCase() !== "readme.md")
-    .map((f) => {
-      const fm = readFrontmatter(readFileSync(join(dir, f), "utf8"), { file: `features/${f}` });
-      const owns = fm.owns ?? [];
-      return {
-        id: fm.id ?? basename(f, ".md"),
-        // `owns:` absent and `owns: []` are different claims: one is unfinished, the other says
-        // "this feature owns no code yet". Only the first should be reported as a mistake.
-        declaresOwns: "owns" in fm,
-        owns: Array.isArray(owns) ? owns : [owns].filter(Boolean),
-      };
-    });
+  // `rowFilesIn` rather than a flat read with the predicate inlined here: features are the one
+  // table a person authors by hand, so they are the table most likely to be sharded, and a
+  // feature this missed claimed nothing — which also exempted it from the dead-feature check.
+  return rowFilesIn(dir).map((f) => {
+    const fm = readFrontmatter(readFileSync(join(dir, f), "utf8"), { file: `features/${f}` });
+    const owns = fm.owns ?? [];
+    return {
+      // `basename` because `f` may name a shard: a feature at `2026/F-1.md` with no explicit id
+      // would otherwise take `2026/F-1` as one, and no `owns:` join would ever match it.
+      id: fm.id ?? basename(f, ".md"),
+      // `owns:` absent and `owns: []` are different claims: one is unfinished, the other says
+      // "this feature owns no code yet". Only the first should be reported as a mistake.
+      declaresOwns: "owns" in fm,
+      owns: Array.isArray(owns) ? owns : [owns].filter(Boolean),
+    };
+  });
 }
 
 /**
@@ -680,43 +684,49 @@ function report(root, surfaces, features) {
 
 // ── commands ────────────────────────────────────────────────────────────────────
 /**
- * Rewrite the table: rows are replaced wholesale so a deleted screen's row disappears, but
- * anything gitdata reserves as a non-row is left alone.
+ * Rewrite one machine-owned table: rows replaced wholesale so a deleted screen's row disappears,
+ * but anything gitdata reserves as a non-row is left alone.
  *
- * The previous version was `rmSync` on the directory, which deleted the table's own README.md,
- * _template.md and .gitkeep — the files gitdata's `isRowFile` explicitly protects — and then
- * reported them as removed surfaces. A machine-owned table could not be documented in the
- * gitdata idiom, and an empty table vanished on clone.
+ * Two earlier versions of this function each got half of it. The first was `rmSync` on the
+ * directory, which deleted the table's own README.md, _template.md and .gitkeep — the files
+ * gitdata reserves — and then reported them as removed surfaces; a machine-owned table could not
+ * be documented in the gitdata idiom, and an empty table vanished on clone. The second protected
+ * those files but read the table with one flat `readdirSync`, and a gitdata table may shard:
+ * `data/surfaces/2026/01/x.md` is a row of `surfaces`. So a row in a shard survived the rewrite
+ * that claims to replace every row, `committedRows` below could not see it either, and `check`
+ * printed "Map is current." over a screen that had not existed for months — while gitdata went on
+ * loading it. Silent, permanent, and invisible to the one command written to catch exactly that.
+ *
+ * `rowFilesIn` walks the table the way the loader does, so the promise in this docstring holds
+ * against both failures at once.
+ *
+ * New rows are still written flat: nesting is something a person does to a table that outgrew one
+ * directory, never something this tool imposes. An emptied shard directory is left behind rather
+ * than removed — deleting directories is how the first version destroyed the README.
  */
-/** What gitdata loads as a row. `_`-prefixed files and the table's own README are not rows. */
-const isRowFile = (f) => f.endsWith(".md") && !f.startsWith("_") && f.toLowerCase() !== "readme.md";
-
-/** Rewrite one machine-owned table: rows replaced wholesale, non-rows left alone. */
 function writeTable(root, table, rows, serialize) {
   const dir = join(root, "data", table);
   mkdirSync(dir, { recursive: true });
-  for (const f of readdirSync(dir)) {
-    if (isRowFile(f) && statSync(join(dir, f)).isFile()) rmSync(join(dir, f));
-  }
+  for (const f of rowFilesIn(dir)) rmSync(join(dir, f));
   for (const r of rows) writeFileSync(join(dir, `${r.id}.md`), serialize(r), "utf8");
 }
 
 /**
- * The committed rows, by the same definition `writeSurfaces` uses.
+ * The committed rows, by the same definition `writeTable` uses — now literally the same, rather
+ * than a second spelling of it that has to be kept in step by hand.
  *
- * These two disagreed: one preserved the table's README and `_template.md`, the other counted them
- * as rows — so every run reported them `- gone`, the gate was red forever, and running `sync` (the
- * advice the failure prints) could not clear it. Documenting a machine-owned table in the gitdata
- * idiom was enough to make the tool permanently fail.
+ * These two disagreed once already: one preserved the table's README and `_template.md`, the other
+ * counted them as rows — so every run reported them `- gone`, the gate was red forever, and
+ * running `sync` (the advice the failure prints) could not clear it. Documenting a machine-owned
+ * table in the gitdata idiom was enough to make the tool permanently fail.
+ *
+ * Keys are paths relative to the table, so a row in a shard is a distinct key from a flat row of
+ * the same name and the diff can name where it lives.
  */
 function committedRows(root, table) {
   const dir = join(root, "data", table);
   if (!existsSync(dir)) return new Map();
-  return new Map(
-    readdirSync(dir)
-      .filter(isRowFile)
-      .map((f) => [f, readFileSync(join(dir, f), "utf8")]),
-  );
+  return new Map(rowFilesIn(dir).map((f) => [f, readFileSync(join(dir, f), "utf8")]));
 }
 
 function diffTable(root, table, rows, serialize) {

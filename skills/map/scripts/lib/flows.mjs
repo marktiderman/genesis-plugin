@@ -27,9 +27,10 @@
  * below (plus the frontmatter reader) so the map dashboard's "authored" numbers are computed
  * exactly once and read here, not reimplemented.
  */
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, existsSync } from "node:fs";
+import { basename, join } from "node:path";
 import { readFrontmatter } from "./frontmatter.js";
+import { rowFilesIn } from "./rows.js";
 
 export const ALLOWED_ACTORS = ["solo", "member", "coached-client", "coach", "admin"];
 export const ALLOWED_ENTRY = ["nav", "inline", "external", "system"];
@@ -69,17 +70,23 @@ export function section(body, heading) {
 }
 
 /**
- * Rows in a table dir: every `.md` file except `_`-prefixed ones and `README.md`.
+ * Rows in a table dir, as paths relative to it — the one definition, from `lib/rows.js`.
+ *
+ * This used to spell the definition itself, and got it wrong twice. Its README clause was
+ * `f !== "README.md"`, case-SENSITIVE, where gitdata's loader — and this tool's other copy —
+ * exclude `readme.md` in any casing. So a table documented in `ReadMe.md` was a row here and a
+ * non-row everywhere else, and since the reader below fails loudly on a file with no frontmatter,
+ * `map check` exited 1 on `features/ReadMe.md: no frontmatter block` with nothing `sync` could do
+ * about it. And it read one flat level, so a sharded table's rows were not verified at all: a flow
+ * step naming a deleted surface passed, because neither the flow nor the surface was seen.
  *
  * An absent dir is an absent table, not a crash: `data/flows/` in particular is optional (see the
- * module doc), and `readdirSync` on a directory that was never created throws ENOENT rather than
+ * module doc), and `rowFilesIn` on a directory that was never created throws ENOENT rather than
  * reporting an empty table the same way every other missing source in this tool does.
  */
 export function listFiles(dir) {
   if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((f) => f.endsWith(".md") && !f.startsWith("_") && f !== "README.md")
-    .sort();
+  return rowFilesIn(dir);
 }
 
 export const STEP_RE = /^(\d+)\.\s+`([a-z0-9-]+)`\s+—\s+(.+)$/;
@@ -154,7 +161,10 @@ export function loadMapTables(root = process.cwd()) {
     }
     const body = bodyOf(text);
 
-    const filenameMatch = /^([A-Za-z0-9-]+)--([a-z0-9-]+)\.md$/.exec(f);
+    // The filename convention is about the file, not about which shard it sits in: `f` may now be
+    // `2026/FL-1--x.md`, and matching the whole relative path would report every sharded flow as
+    // misnamed. `basename` keeps the rule the rule.
+    const filenameMatch = /^([A-Za-z0-9-]+)--([a-z0-9-]+)\.md$/.exec(basename(f));
     if (!filenameMatch) {
       fail(`${file}: filename doesn't match <id>--<slug>.md`);
     } else {
