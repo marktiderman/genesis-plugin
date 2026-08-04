@@ -39,6 +39,18 @@ jobs:
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
           prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+          # Let the review RUN the suite rather than only read it.
+          #
+          # Reviews limited to reading repeatedly cleared changes that a review able to execute then
+          # found broken — including a `--check` that validated everything except the one property
+          # its own pull request existed to guarantee. Reading confirms a change is self-consistent.
+          # Only running confirms the check fails when the promise breaks.
+          #
+          # Deliberately narrow, because this triggers on `pull_request` and the code under review
+          # is untrusted: a blanket `Bash` grant would let any pull request run anything with this
+          # job's token. `node --test` needs no install and no network here — the suite is Node
+          # built-ins only — so the whole capability is one command over files already checked out.
+          claude_args: '--allowedTools "Bash(node --test:*)"'
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 

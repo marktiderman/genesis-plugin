@@ -122,7 +122,7 @@ table can be named: a legacy table constant, the generated Supabase types, a han
 registry, `.from(…)` calls, and migrations. Every source is recorded separately rather than merged
 into one "exists" flag, **because the disagreements are the point.** A table with RLS enabled that
 no type file knows about and no screen reaches is only visible if `declared`, `rls_enabled` and
-`reached_from_src` are allowed to contradict each other on the same row.
+`reach` are allowed to contradict each other on the same row.
 
 `backing` is the reconciled verdict, and it consults the migrations: `jsonb`, `supabase` (in the
 generated types), `migration` (created by a migration here, absent from those types), `edge-only`
@@ -130,10 +130,34 @@ generated types), `migration` (created by a migration here, absent from those ty
 `migration` rung a monorepo whose data layer *is* its migrations reported 26 of 28 tables as
 `edge-only` or `orphan` while creating every one of them.
 
-`reached_from_src` counts three forms — `.from("x")`, the legacy `TABLES.KEY` constant, and a name
-the resource registry already declared appearing as a call's first argument, which is how a
-resource routed through a data-provider switchboard is written (`useResource("tasks")`). The third
-is bounded by the declaration: it can confirm a reach, never invent a table from a string.
+`reach` is a four-value ladder, strongest first — `feature`, `listed`, `test`, `none` — not the
+boolean it replaced. `reached_from_src: "true"|"false"` forced two different facts into one field:
+a table an admin data browser lists as a literal string and reads through a variable (`.from(table
+as string)`, never `.from("that_table")`) said `"false"` though it is genuinely reachable, just not
+by any recognized call; a table whose only mention anywhere is a test asserting it is *denied* said
+`"true"`, because the boolean could not tell "a feature reaches this" from "a test proves nothing
+does." Flipping the false rows would have made the ledger row below an unfalsifiable 57/57 — the
+fix is more values, not a flipped bit:
+
+1. **`feature`** — a recognized call in a non-test file: `.from("x")`, the legacy `TABLES.KEY`
+   constant, or a name the resource registry already declared appearing as a call's first
+   argument, which is how a resource routed through a data-provider switchboard is written
+   (`useResource("tasks")`). That third form is bounded twice — by the declaration, so it can
+   confirm a reach but never invent a table from a string, and by the callee itself: only a `use*`
+   hook or a CRUD verb (`getList`, `create`, …) counts, so a declared name passed to an unrelated
+   call — a translation lookup, a log line, a test's `describe(...)` — does not read as `feature`.
+2. **`listed`** — the name appears as a bare, exactly-quoted string literal in a non-test file, but
+   no recognized call reaches it. Someone wrote the name down; nothing recognized calls it. This
+   rung does not try to tell a config file's array of table names from an unrelated string that
+   happens to match one — that would be guessing at a file's purpose, and "the literal appears, but
+   no call I recognize uses it" is mechanically checkable without it.
+3. **`test`** — the name appears, in any of the forms above, only inside test files (`*.test.*`,
+   `*.spec.*`, anything under `__tests__/`).
+4. **`none`** — the name appears nowhere under `src/`.
+
+Precedence runs in that order regardless of which file a directory happens to read first: a table
+both `listed` and `feature`-reached is `feature`; a table named in both a test and a non-test
+literal is `listed`, not `test` — a real, if weak, non-test mention outranks a test-only one.
 
 Where a legacy and a typed table share a name — one app had `Coaches` and `coaches` — the id is
 qualified by backing rather than letting one row overwrite the other.
