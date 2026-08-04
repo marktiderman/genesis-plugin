@@ -83,21 +83,33 @@ see**, every denominator counted outside the map. Nothing you write in `data/` m
 there; the only way to move one is to teach the extractor to see more. Expect the numbers to get
 worse when a new extractor lands — that is it working.
 
+That last claim is enforced, not asserted: `check` recomputes the ledger and compares it to the
+committed one, so a hand-edited number is drift and fails the gate exactly like a hand-edited row.
+It used to be written by `sync` and verified by nothing, which made the property a decoration —
+editing the file to read `typed tables reached from src 99 / 99` passed CI.
+
+Both sides of every fraction are the same unit. `screens routed in src/App.tsx` counts distinct
+innermost non-chrome components, not `<Route` tags: one app's 104 route tags are 42 screens once
+`<Navigate>`s, legacy redirects and the same page mounted in five scopes are set aside, and a
+denominator nothing can reach reports blindness where there is none.
+
 ## What `check` reports
 
 | mark | finding | exit |
 | --- | --- | --- |
-| `+` `-` `~` | a screen appeared, vanished, or changed scope/route/layout | 1 |
+| `+` `-` `~` | a screen, resource, or the blind-spots ledger appeared, vanished, or changed | 1 |
 | `!` | a feature whose globs match nothing **in a directory this tool extracts** | 1 |
 | `?` | a screen no feature's `owns:` glob claims | 0 |
+| `·` | a source this repo does not have, so that half was not extracted | 0 |
 
 The committed rows are the baseline; `check` compares a fresh extraction against them.
 
 **Only stale facts fail.** `+ - ~ !` mean the committed map is untrue, and one `sync` fixes it.
-`?` is the gap report — the parts of the app serving no articulated job — and on an existing
-codebase it starts at nearly every screen. Failing on it would make the gate unusable the day it
-is installed, and a check nobody can turn green is a check that gets deleted. Coverage is held
-instead by `claimed_by` in the rows: lose a claim and it surfaces as `~`, which does fail.
+`?` and `·` are gap reports — the parts of the app serving no articulated job, and the parts of
+this app's stack the repo does not have — and on an existing codebase `?` starts at nearly every
+screen. Failing on those would make the gate unusable the day it is installed, and a check nobody
+can turn green is a check that gets deleted. Coverage is held instead by `claimed_by` in the rows:
+lose a claim and it surfaces as `~`, which does fail.
 
 ## Using it
 
@@ -163,4 +175,20 @@ Four functions read this stack, and all four are in one file:
 
 Everything downstream — the two-table split, the `owns:` join, the drift check — is stack-agnostic.
 `navFacts` degrades to empty when its file is absent; an app with no scope prefixes simply files
-every screen under `personal`. Only `src/App.tsx` is required.
+every screen under `personal`.
+
+**No single file is required.** The two extractors are independent: a repo with no React Router
+still has a data layer, and a repo with no migrations still has screens. A source this repo does
+not have is reported as `·` and the other half runs anyway. The tool fails only when *every*
+source is missing — a stack it cannot read at all — because writing "no screens, no tables" for
+one would be a confident, wrong fact, which is the failure the whole map exists to avoid.
+
+A table whose sources are all absent is left alone entirely: not written, not emptied. If rows for
+it are already committed and the source has since vanished, that fails rather than wiping them —
+a moved router looks identical to a deleted app, and only one of those should cost you the map.
+
+That refusal is scoped to the one table. The other table is still written, because a refusal about
+screens is not a reason to withhold a freshly-read fact about a database — a run that refused
+surfaces once left `rls_enabled: "true"` committed against migrations that had just turned it off,
+with no path to correct it. The ledger *is* withheld, since it is derived from both tables. The
+error names what was written and what was not.

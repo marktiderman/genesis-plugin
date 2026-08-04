@@ -69,6 +69,42 @@ const stripSql = (s) => stripLine(s, "--");
 
 /** `export const TABLES = { PEOPLE: "People", ... }` — the legacy jsonb table names. */
 export const LEGACY_TABLE_FILES = ["src/lib/content.ts", "src/lib/airtable.ts"];
+/** The generated Supabase types — the typed half of the data plane. */
+export const TYPES_FILE = "src/integrations/supabase/types.ts";
+/** The hand-written registry: the one place a human wrote down what each resource is. */
+export const REGISTRY_FILE = "src/lib/resource-registry.ts";
+/** App code, scanned for `.from("x")` and `TABLES.KEY` references. */
+export const SRC_DIR = "src";
+export const MIGRATIONS_DIR = "supabase/migrations";
+export const FUNCTIONS_DIR = "supabase/functions";
+
+/**
+ * Every place this module reads a table name from, as groups of alternatives — a group is readable
+ * if any path in it exists. Named here so the caller can report an absent source instead of
+ * silently extracting nothing, and so the list cannot drift from the readers below: each function
+ * uses the same constant.
+ *
+ * This is existence, not inference. It answers "did I have anything to read", never "what is in it".
+ */
+export const RESOURCE_SOURCES = [
+  LEGACY_TABLE_FILES,
+  [TYPES_FILE],
+  [REGISTRY_FILE],
+  [SRC_DIR],
+  [MIGRATIONS_DIR],
+  [FUNCTIONS_DIR],
+];
+
+/**
+ * The `export const TABLES = {...}` block, tolerating an optional type annotation
+ * (`export const TABLES: Record<string, string> = {`) between the name and the `=`. Ordinary
+ * TypeScript — adding one changed nothing about what the object contains — silently cost the map
+ * all 24 legacy tables, because the old pattern required `=` to follow `TABLES` with only
+ * whitespace between them. The annotation is captured up to the first `=` on the same line, not
+ * `[\s\S]`, so this still cannot be satisfied by unrelated code that merely also assigns an
+ * object — the colon after `TABLES` is what makes it a type annotation and not a syntax error.
+ */
+const TABLES_BLOCK = /export const TABLES(?:\s*:\s*[^=\n]+)?\s*=\s*\{([\s\S]*?)\n\}/;
 
 export function legacyTables(root) {
   // The file gets renamed — this one went `airtable.ts` -> `content.ts` and the map silently lost
@@ -78,15 +114,37 @@ export function legacyTables(root) {
   for (const rel of LEGACY_TABLE_FILES) {
     const p = join(root, rel);
     if (!existsSync(p)) continue;
-    const block = /export const TABLES\s*=\s*\{([\s\S]*?)\n\}/.exec(stripJs(readFileSync(p, "utf8")));
+    const block = TABLES_BLOCK.exec(stripJs(readFileSync(p, "utf8")));
     if (block) return Object.fromEntries([...block[1].matchAll(/^\s{0,4}(\w+):\s*"([^"]+)"/gm)].map((m) => [m[1], m[2]]));
   }
   return {};
 }
 
+/**
+ * A `LEGACY_TABLE_FILES` candidate that exists on disk but did not yield a `TABLES` block from
+ * *any* present candidate — the disagreement between `missingSources` (existence) and this
+ * reader (content) made visible, without failing.
+ *
+ * `RESOURCE_SOURCES`/`missingSources` answers "did I have anything to read" by `existsSync`, but
+ * `legacyTables` reads by content — its own comment above says so. The two silently disagreed: a
+ * ordinary TypeScript edit (or any future syntax this parser does not yet handle) left
+ * `src/lib/content.ts` present and unreadable, `missingSources` correctly saw no absent file and
+ * printed no `·`, and 24 tables vanished from the map with zero marks anywhere pointing at why.
+ *
+ * This does not fail, and it must not: `src/lib/content.ts` existing with no `TABLES` export is
+ * ordinary in a repo that never had legacy Airtable tables — a common filename, not a defect — so
+ * treating its mere presence as an error would misfire on every unrelated repo that happens to use
+ * it. A `-` on the committed map already catches the row loss as drift; this only supplies the
+ * reason a reader would otherwise have to guess at.
+ */
+export function unparsedLegacyTableFile(root) {
+  const present = LEGACY_TABLE_FILES.filter((rel) => existsSync(join(root, rel)));
+  return present.length > 0 && Object.keys(legacyTables(root)).length === 0 ? present : null;
+}
+
 /** Table names in the generated Supabase types — the typed half of the data plane. */
 export function typedTables(root) {
-  const p = join(root, "src/integrations/supabase/types.ts");
+  const p = join(root, TYPES_FILE);
   if (!existsSync(p)) return [];
   const src = readFileSync(p, "utf8");
   const start = src.indexOf("    Tables: {");
@@ -117,7 +175,7 @@ function bracedAfter(text, key) {
 }
 
 export function declaredResources(root, tables) {
-  const p = join(root, "src/lib/resource-registry.ts");
+  const p = join(root, REGISTRY_FILE);
   if (!existsSync(p)) return [];
   const src = stripJs(readFileSync(p, "utf8"));
   const out = [];
@@ -187,7 +245,7 @@ export function tableRefs(dir, tables, { label = (f) => f } = {}) {
  * left for the verification pass to confirm.
  */
 export function rlsFromMigrations(root) {
-  const dir = join(root, "supabase/migrations");
+  const dir = join(root, MIGRATIONS_DIR);
   if (!existsSync(dir)) return {};
   const out = {};
   for (const file of readdirSync(dir).sort()) {
@@ -289,7 +347,7 @@ export function sqlStatements(sql) {
 
 /** Edge function names, and which of them bypass JWT verification. */
 export function edgeFunctions(root) {
-  const dir = join(root, "supabase/functions");
+  const dir = join(root, FUNCTIONS_DIR);
   if (!existsSync(dir)) return { names: [], noJwt: [] };
   const names = readdirSync(dir, { withFileTypes: true })
     .filter((e) => e.isDirectory() && !e.name.startsWith("_"))
@@ -320,8 +378,8 @@ export function extractResources(root) {
   const typed = typedTables(root);
   const declared = declaredResources(root, tables);
   const declaredBy = new Map(declared.map((d) => [d.name, d]));
-  const appHits = tableRefs(join(root, "src"), tables);
-  const fnDir = join(root, "supabase/functions");
+  const appHits = tableRefs(join(root, SRC_DIR), tables);
+  const fnDir = join(root, FUNCTIONS_DIR);
   const fnHits = existsSync(fnDir)
     ? tableRefs(fnDir, tables, {
         // `_shared/` is helper modules rather than a function, so it is an imprecise consumer
