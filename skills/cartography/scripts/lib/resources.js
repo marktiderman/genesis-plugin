@@ -14,15 +14,74 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
+/**
+ * Blank out comments, preserving offsets. A commented-out policy or a `defineResource` inside an
+ * example comment otherwise becomes a live resource row — the map inventing tables out of prose.
+ */
+function stripLine(src, lineToken) {
+  let out = "";
+  for (let i = 0; i < src.length; i++) {
+    if (src.startsWith(lineToken, i)) {
+      for (; i < src.length && src[i] !== "\n"; i++) out += " ";
+      out += "\n";
+      continue;
+    }
+    if (src.startsWith("/*", i)) {
+      const end = src.indexOf("*/", i + 2);
+      const stop = end === -1 ? src.length : end + 2;
+      for (; i < stop; i++) out += src[i] === "\n" ? "\n" : " ";
+      i--;
+      continue;
+    }
+    out += src[i];
+    if (src[i] === '"' || src[i] === "'" || src[i] === "`") {
+      const q = src[i];
+      // A `'` or `"` run may not cross a newline — only a template literal may. Without that
+      // limit an apostrophe in JSX text ("Don't") or a quote inside a regex literal (/["']/)
+      // opened a string that never closed, and the scanner ran on for a hundred lines with every
+      // real comment inside it left un-blanked. Twelve files in one consumer desync that way.
+      const start = i;
+      let body = "";
+      let closed = false;
+      for (i++; i < src.length; i++) {
+        if (q !== "`" && src[i] === "\n") break;
+        body += src[i];
+        if (src[i] === "\\" && i + 1 < src.length) {
+          body += src[++i];
+          continue;
+        }
+        if (src[i] === q) {
+          closed = true;
+          break;
+        }
+      }
+      if (closed) out += body;
+      else {
+        // Not a string after all: emit nothing extra and resume scanning right after the quote.
+        i = start;
+      }
+    }
+  }
+  return out;
+}
+const stripJs = (s) => stripLine(s, "//");
+const stripSql = (s) => stripLine(s, "--");
+
 /** `export const TABLES = { PEOPLE: "People", ... }` — the legacy jsonb table names. */
+export const LEGACY_TABLE_FILES = ["src/lib/content.ts", "src/lib/airtable.ts"];
+
 export function legacyTables(root) {
-  const p = join(root, "src/lib/airtable.ts");
-  if (!existsSync(p)) return {};
-  const block = /export const TABLES\s*=\s*\{([\s\S]*?)\n\}/.exec(readFileSync(p, "utf8"));
-  if (!block) return {};
-  return Object.fromEntries(
-    [...block[1].matchAll(/(\w+):\s*"([^"]+)"/g)].map((m) => [m[1], m[2]]),
-  );
+  // The file gets renamed — this one went `airtable.ts` -> `content.ts` and the map silently lost
+  // all 24 legacy tables, taking every registry declaration keyed on them along too.
+  // Chosen by content, not by existence: `content.ts` is a common filename, and picking a file
+  // that merely exists lost all 24 tables to an unrelated namesake.
+  for (const rel of LEGACY_TABLE_FILES) {
+    const p = join(root, rel);
+    if (!existsSync(p)) continue;
+    const block = /export const TABLES\s*=\s*\{([\s\S]*?)\n\}/.exec(stripJs(readFileSync(p, "utf8")));
+    if (block) return Object.fromEntries([...block[1].matchAll(/^\s{0,4}(\w+):\s*"([^"]+)"/gm)].map((m) => [m[1], m[2]]));
+  }
+  return {};
 }
 
 /** Table names in the generated Supabase types — the typed half of the data plane. */
@@ -60,7 +119,7 @@ function bracedAfter(text, key) {
 export function declaredResources(root, tables) {
   const p = join(root, "src/lib/resource-registry.ts");
   if (!existsSync(p)) return [];
-  const src = readFileSync(p, "utf8");
+  const src = stripJs(readFileSync(p, "utf8"));
   const out = [];
   for (const chunk of src.split("defineResource({").slice(1)) {
     const head = chunk.slice(0, 4000);
@@ -73,7 +132,7 @@ export function declaredResources(root, tables) {
       name,
       backing: /backing:\s*"(\w+)"/.exec(head)?.[1] ?? null,
       description: /description:\s*"([^"]*)"/.exec(head)?.[1] ?? null,
-      fields: fields ? [...fields.matchAll(/^\s*"?([\w ]+)"?:\s*"/gm)].map((m) => m[1].trim()) : [],
+      fields: fields ? [...fields.matchAll(/^\s*(?:"([^"]+)"|([\w ]+)):\s*"/gm)].map((m) => (m[1] ?? m[2]).trim()) : [],
       scope: /scope:\s*"(\w+)"/.exec(head)?.[1] ?? (/scope:\s*\{/.test(head) ? "rule" : null),
       debt: /\bdebt:\s*true/.test(head),
     });
@@ -106,7 +165,10 @@ export function tableRefs(dir, tables, { label = (f) => f } = {}) {
         continue;
       }
       if (!/\.(ts|tsx)$/.test(e.name)) continue;
-      const src = readFileSync(path, "utf8");
+      // The registry declares `TABLES.COACHES`; that is a declaration, not a read. Counting it
+      // marked five tables the app never touches as reached, contradicting their own `unused` note.
+      if (/resource-registry\.(ts|test\.ts)$/.test(e.name)) continue;
+      const src = stripJs(readFileSync(path, "utf8"));
       for (const m of src.matchAll(/\.from\(\s*["']([\w.]+)["']/g)) {
         (hits[m[1]] ??= new Set()).add(label(path));
       }
@@ -130,21 +192,76 @@ export function rlsFromMigrations(root) {
   const out = {};
   for (const file of readdirSync(dir).sort()) {
     if (!file.endsWith(".sql")) continue;
-    const sql = readFileSync(join(dir, file), "utf8");
-    for (const m of sql.matchAll(/ALTER TABLE\s+(?:public\.)?"?(\w+)"?\s+ENABLE ROW LEVEL SECURITY/gi)) {
-      (out[m[1]] ??= { enabled: false, commands: new Set() }).enabled = true;
-    }
-    // The policy name is consumed as a whole quoted string before ON is looked for. Scanning
-    // loosely for " ON " found it inside names like "Coaches can manage fields on own templates"
-    // and invented tables called `own` and `published`.
-    for (const m of sql.matchAll(
-      /CREATE POLICY\s+(?:IF NOT EXISTS\s+)?(?:"[^"]*"|\w+)\s+ON\s+(?:public\.)?"?(\w+)"?([\s\S]{0,200}?);/gi,
-    )) {
-      const entry = (out[m[1]] ??= { enabled: false, commands: new Set() });
-      const cmd = /\bFOR\s+(ALL|SELECT|INSERT|UPDATE|DELETE)\b/i.exec(m[2]);
-      entry.commands.add(cmd ? cmd[1].toLowerCase() : "all");
+    // Statement by statement, in order. Three separate passes over one file meant a DROP was
+    // applied before the policies below it were read, so a table dropped after its own
+    // CREATE POLICY came back to life — and scanning raw text for "DROP TABLE" let the words
+    // inside a COMMENT or a quoted string delete live tables. A statement is the unit that
+    // decides both.
+    for (const stmt of sqlStatements(stripSql(readFileSync(join(dir, file), "utf8")))) {
+      const drop = /^\s*DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(.+)$/is.exec(stmt);
+      if (drop) {
+        for (const name of drop[1].split(",")) {
+          const bare = /^\s*(?:public\.)?"?([\w ]+)"?/.exec(name.replace(/\b(CASCADE|RESTRICT)\b/i, "").trim());
+          if (bare) delete out[bare[1].trim()];
+        }
+        continue;
+      }
+      const enable = /^\s*ALTER\s+TABLE\s+(?:public\.)?"?(\w+)"?[\s\S]*ENABLE\s+ROW\s+LEVEL\s+SECURITY/i.exec(stmt);
+      if (enable) {
+        (out[enable[1]] ??= { enabled: false, commands: new Set() }).enabled = true;
+        continue;
+      }
+      // The policy name is consumed as a whole quoted string before ON is looked for; scanning
+      // loosely for " ON " found it inside names like "manage fields on own templates".
+      const policy = /^\s*CREATE\s+POLICY\s+(?:IF NOT EXISTS\s+)?(?:"[^"]*"|\w+)\s+ON\s+(?:public\.)?"?(\w+)"?([\s\S]*)$/i.exec(stmt);
+      if (policy) {
+        const entry = (out[policy[1]] ??= { enabled: false, commands: new Set() });
+        const cmd = /\bFOR\s+(ALL|SELECT|INSERT|UPDATE|DELETE)\b/i.exec(policy[2]);
+        entry.commands.add(cmd ? cmd[1].toLowerCase() : "all");
+      }
     }
   }
+  return out;
+}
+
+/**
+ * Split SQL into top-level statements, stepping over string literals, quoted identifiers and
+ * dollar-quoted bodies. Without this, `DROP TABLE` written inside a COMMENT or a plpgsql body
+ * reads as a real drop.
+ */
+export function sqlStatements(sql) {
+  const out = [];
+  let buf = "";
+  for (let i = 0; i < sql.length; i++) {
+    const c = sql[i];
+    if (c === "'" || c === '"') {
+      const q = c;
+      buf += c;
+      for (i++; i < sql.length; i++) {
+        buf += sql[i];
+        if (sql[i] === q) {
+          if (sql[i + 1] === q) buf += sql[++i];
+          else break;
+        }
+      }
+      continue;
+    }
+    const tag = /^\$(\w*)\$/.exec(sql.slice(i, i + 40));
+    if (tag) {
+      const close = sql.indexOf(tag[0], i + tag[0].length);
+      const stop = close === -1 ? sql.length : close + tag[0].length;
+      buf += sql.slice(i, stop);
+      i = stop - 1;
+      continue;
+    }
+    if (c === ";") {
+      if (buf.trim()) out.push(buf);
+      buf = "";
+      continue;
+    }
+    buf += c;
+  }
+  if (buf.trim()) out.push(buf);
   return out;
 }
 
@@ -184,7 +301,13 @@ export function extractResources(root) {
   const appHits = tableRefs(join(root, "src"), tables);
   const fnDir = join(root, "supabase/functions");
   const fnHits = existsSync(fnDir)
-    ? tableRefs(fnDir, tables, { label: (f) => f.slice(fnDir.length + 1).split("/")[0] })
+    ? tableRefs(fnDir, tables, {
+        // `_shared/` is helper modules rather than a function, so it is an imprecise consumer
+        // label — but skipping the directory deleted the only evidence for tables reached solely
+        // through a helper, dropping those rows from the map entirely. A rough label beats a
+        // missing resource; resolving helpers to their importers is the real fix.
+        label: (f) => f.slice(fnDir.length + 1).split("/")[0],
+      })
     : {};
   const rls = rlsFromMigrations(root);
 

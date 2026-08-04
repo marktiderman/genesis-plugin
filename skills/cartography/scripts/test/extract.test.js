@@ -293,7 +293,7 @@ describe("resources", () => {
       mkdirSync(join(root, rel, ".."), { recursive: true });
       writeFileSync(join(root, rel), text, "utf8");
     };
-    put("src/lib/airtable.ts", 'export const TABLES = {\n  PEOPLE: "People",\n}\n');
+    put("src/lib/content.ts", 'export const TABLES = {\n  PEOPLE: "People",\n  // REMOVED: GHOSTS: "Ghosts",\n}\n');
     put(
       "src/integrations/supabase/types.ts",
       `    Tables: {\n      journal_entries: {\n        Row: {}\n      }\n      projects: {\n        Row: {}\n      }\n    }\n    Views: {\n`,
@@ -308,11 +308,178 @@ describe("resources", () => {
     put(
       "supabase/migrations/0001_init.sql",
       `ALTER TABLE public.ghost_table ENABLE ROW LEVEL SECURITY;\n` +
-        `CREATE POLICY "Coaches manage fields on own templates" ON public.ghost_table\n  FOR SELECT USING (true);\n`,
+        `CREATE POLICY "Coaches manage fields on own templates" ON public.ghost_table\n  FOR SELECT USING (true);\n` +
+        `-- CREATE POLICY "commented" ON public.never_real FOR SELECT USING (true);\n` +
+        `ALTER TABLE public.retired ENABLE ROW LEVEL SECURITY;\n` +
+        `CREATE POLICY "p" ON public.retired\n  FOR ALL USING (\n    ${"x".repeat(300)}\n  );\n`,
     );
+    put("supabase/migrations/0002_drop.sql", "DROP TABLE IF EXISTS public.retired;\n");
+    put("supabase/functions/_shared/util.ts", 'await admin.from("ghost_table").select()');
     put("supabase/functions/send-sms/index.ts", 'await admin.from("ghost_table").insert({})');
     return root;
   };
+
+  test("a table dropped below its own policies is still dropped", () => {
+    // Three passes over one file applied every DROP before any CREATE POLICY was read, so a table
+    // dropped after its policies came back to life — the same direction as the defect this whole
+    // change exists to fix, reintroduced by the fix for it.
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    mkdirSync(join(root, "supabase/migrations"), { recursive: true });
+    writeFileSync(
+      join(root, "supabase/migrations/0001.sql"),
+      `ALTER TABLE public.staging ENABLE ROW LEVEL SECURITY;\n` +
+        `CREATE POLICY "r" ON public.staging FOR SELECT USING (true);\n` +
+        `DROP TABLE public.staging;\n`,
+    );
+    run(root);
+    assert.ok(!rows(root, "resources").staging, "a dropped table came back to life");
+  });
+
+  test("the words DROP TABLE inside a string do not drop anything", () => {
+    // A COMMENT ON TABLE mentioning a drop deleted two live tables from the map — valid SQL
+    // containing no DROP statement at all, silently understating access.
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    mkdirSync(join(root, "supabase/migrations"), { recursive: true });
+    writeFileSync(
+      join(root, "supabase/migrations/0001.sql"),
+      `ALTER TABLE public.legacy_a ENABLE ROW LEVEL SECURITY;\n` +
+        `CREATE POLICY "p" ON public.legacy_a FOR ALL USING (true);\n` +
+        `COMMENT ON TABLE public.other IS 'supersedes DROP TABLE legacy_a, legacy_b';\n` +
+        `DO $$ BEGIN RAISE NOTICE 'never DROP TABLE legacy_a'; END $$;\n`,
+    );
+    run(root);
+    assert.deepEqual(rows(root, "resources")["legacy-a"].rls, ["all"]);
+  });
+
+  test("does not read a nested object's value as a table name", () => {
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    mkdirSync(join(root, "src/lib"), { recursive: true });
+    writeFileSync(
+      join(root, "src/lib/content.ts"),
+      'export const TABLES = {\n  PEOPLE: "People",\n  meta: { v: "1" },\n  WINS: "Wins",\n}\n',
+    );
+    run(root);
+    const r = rows(root, "resources");
+    assert.ok(!r["1"], "invented a table from a nested value");
+    assert.ok(r.people && r.wins, "truncated the list at the nested object");
+  });
+
+  test("a table dropped and recreated keeps its RLS", () => {
+    // Drop-then-create is the standard idempotency idiom. Retiring the name globally wiped RLS
+    // off a live table — a regression in the one direction this must never fail.
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    mkdirSync(join(root, "supabase/migrations"), { recursive: true });
+    writeFileSync(join(root, "supabase/migrations/0001.sql"), "ALTER TABLE public.recycled ENABLE ROW LEVEL SECURITY;\n");
+    writeFileSync(
+      join(root, "supabase/migrations/0002.sql"),
+      `DROP TABLE IF EXISTS public.recycled;\nCREATE TABLE public.recycled ();\n` +
+        `ALTER TABLE public.recycled ENABLE ROW LEVEL SECURITY;\n` +
+        `CREATE POLICY "p" ON public.recycled FOR UPDATE USING (true);\n`,
+    );
+    run(root);
+    assert.deepEqual(rows(root, "resources").recycled.rls, ["update"]);
+    assert.equal(rows(root, "resources").recycled.rls_enabled, "true");
+  });
+
+  test("drops every table named in one statement", () => {
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    mkdirSync(join(root, "supabase/migrations"), { recursive: true });
+    writeFileSync(
+      join(root, "supabase/migrations/0001.sql"),
+      "ALTER TABLE public.aaa ENABLE ROW LEVEL SECURITY;\nALTER TABLE public.bbb ENABLE ROW LEVEL SECURITY;\n",
+    );
+    writeFileSync(join(root, "supabase/migrations/0002.sql"), "DROP TABLE IF EXISTS public.aaa, public.bbb;\n");
+    const r = rows((run(root), root), "resources");
+    assert.ok(!r.aaa && !r.bbb, "a multi-table DROP retired only the first");
+  });
+
+  test("keeps a table reached only through a shared helper", () => {
+    // Skipping `_shared/` deleted the only evidence for such a table, dropping the row entirely.
+    // A rough consumer label beats a missing resource.
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    mkdirSync(join(root, "supabase/functions/_shared"), { recursive: true });
+    writeFileSync(join(root, "supabase/functions/_shared/audit.ts"), 'await admin.from("audit_log").insert({})');
+    run(root);
+    assert.ok(rows(root, "resources")["audit-log"], "a helper-only table vanished from the map");
+  });
+
+  test("does not name a computed key as a field", () => {
+    // `[LEGACY_ACCOUNT_FIELD]: "relation"` names a constant, not a column. Emitting the identifier
+    // put a field called LEGACY_ACCOUNT_FIELD on 14 rows; the real column is Account.
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    mkdirSync(join(root, "src/lib"), { recursive: true });
+    writeFileSync(join(root, "src/lib/content.ts"), 'export const TABLES = {\n  P: "P",\n}\n');
+    writeFileSync(
+      join(root, "src/lib/resource-registry.ts"),
+      `const R = [defineResource({\n  name: TABLES.P,\n  backing: "jsonb",\n` +
+        `  fields: {\n    "Check-in Date": "string",\n    [ACCOUNT]: "relation",\n  },\n})];\n`,
+    );
+    run(root);
+    assert.deepEqual(rows(root, "resources").p.fields, ["Check-in Date"]);
+  });
+
+  test("picks the legacy file that defines TABLES, not merely one that exists", () => {
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    mkdirSync(join(root, "src/lib"), { recursive: true });
+    writeFileSync(join(root, "src/lib/content.ts"), "export const sanitize = (s) => s;\n");
+    writeFileSync(join(root, "src/lib/airtable.ts"), 'export const TABLES = {\n  PEOPLE: "People",\n}\n');
+    run(root);
+    assert.ok(rows(root, "resources").people, "an unrelated namesake file cost all legacy tables");
+  });
+
+  test("a dropped table is not a resource", () => {
+    // `companies` was dropped eight migrations back, survived as a row with full CRUD policies,
+    // and was published as a headline finding. Migrations replay in order; a DROP retires it.
+    const root = dataRepo();
+    run(root);
+    assert.ok(!rows(root, "resources").retired, "a dropped table is still on the map");
+  });
+
+  test("a commented-out policy does not invent a table", () => {
+    const root = dataRepo();
+    run(root);
+    assert.ok(!rows(root, "resources")["never-real"], "invented a table from a SQL comment");
+  });
+
+  test("a commented-out legacy table is not a table", () => {
+    const root = dataRepo();
+    run(root);
+    assert.ok(!rows(root, "resources").ghosts, "invented a table from a commented TABLES entry");
+  });
+
+  test("records a shared helper as a consumer rather than dropping the evidence", () => {
+    // `_shared/` is an imprecise label — it is helper modules, not a function. Skipping it to fix
+    // the label deleted the only evidence for tables reached solely through a helper, dropping
+    // those rows from the map. A rough label beats a missing resource.
+    const root = dataRepo();
+    run(root);
+    assert.ok(rows(root, "resources")["ghost-table"].used_by.includes("_shared"));
+  });
+
+  test("reads a policy longer than the old 200-character window", () => {
+    // The parser gave up after 200 chars, so 9 tables read `rls: []` while holding live policies —
+    // the field most likely to be read as a security fact, understating access.
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    mkdirSync(join(root, "supabase/migrations"), { recursive: true });
+    writeFileSync(
+      join(root, "supabase/migrations/0001.sql"),
+      `ALTER TABLE public.wide ENABLE ROW LEVEL SECURITY;\n` +
+        `CREATE POLICY "p" ON public.wide\n  FOR UPDATE USING (\n    ${"y".repeat(300)}\n  );\n`,
+    );
+    run(root);
+    assert.deepEqual(rows(root, "resources").wide.rls, ["update"]);
+  });
+
+  test("does not count the registry's own declaration as a read", () => {
+    // `TABLES.PEOPLE` inside resource-registry.ts is a declaration. Counting it marked five
+    // tables the app never touches as reached, contradicting their own `unused` note.
+    const root = dataRepo();
+    // Alpha.tsx is what actually reads TABLES.PEOPLE in this fixture; remove it and only the
+    // registry mentions the table.
+    writeFileSync(join(root, "src/pages/Alpha.tsx"), "export default function Alpha(){}");
+    run(root);
+    assert.equal(rows(root, "resources").people.reached_from_src, "false");
+  });
 
   test("reconciles the sources into one row per resource", () => {
     const root = dataRepo();
@@ -336,7 +503,7 @@ describe("resources", () => {
     assert.equal(ghost.backing, "edge-only");
     assert.equal(ghost.rls_enabled, "true");
     assert.deepEqual(ghost.rls, ["select"]);
-    assert.deepEqual(ghost.used_by, ["send-sms"]);
+    assert.deepEqual(ghost.used_by, ["_shared", "send-sms"]);
     assert.equal(ghost.reached_from_src, "false");
   });
 
