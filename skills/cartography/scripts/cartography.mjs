@@ -25,9 +25,11 @@ import { basename, join, relative, resolve } from "node:path";
 import { readFrontmatter, yamlList, yamlScalar } from "./lib/frontmatter.js";
 import {
   RESOURCE_SOURCES,
+  TYPES_FILE,
   edgeFunctions,
   extractResources,
   typedTables,
+  typedTablesState,
   unparsedLegacyTableFile,
 } from "./lib/resources.js";
 
@@ -43,7 +45,8 @@ Reads:  <root>/src/App.tsx (surfaces), <root>/src/**, <root>/supabase/** (resour
         resource extractors are independent. Only an entirely unreadable repo fails.
 Writes: <root>/data/{surfaces,resources}/*.md, <root>/data/_views/blind-spots.md
         <root>/data/features/_inventory.md — on \`init\` only, and only if absent
-Never writes a feature row. \`check\` verifies every file it writes, ledger included.
+Never writes a feature row. \`check\` verifies the surface rows, the resource rows and the
+        ledger — not the \`_inventory.md\` draft, which is yours and no run reads back.
 `;
 
 // ── tiny helpers ────────────────────────────────────────────────────────────────
@@ -218,24 +221,37 @@ function braced(text, open) {
 }
 
 /**
- * The screen behind one `<Route>` tag's element: the innermost component opened, or null when the
- * element is absent or is chrome.
+ * The non-chrome component one `<Route>` tag mounts, and the form it is written in — or null when
+ * there is no element at all, or the one there is chrome.
  *
- * The element may be wrapped in guards and providers (`<AdminGuard><AdminHome /></AdminGuard>`).
- * The screen is the innermost component — the last one opened — since taking an outer one
- * collapses every guarded page into a single row named after the guard.
+ * `element` is `element={<Home />}`, possibly wrapped in guards and providers
+ * (`<AdminGuard><AdminHome /></AdminGuard>`). The screen is the innermost component — the last one
+ * opened — since taking an outer one collapses every guarded page into a single row named after
+ * the guard. It is the only form extraction turns into a row.
  *
- * Named once because it is used twice: extraction turns it into rows, and the blind-spots ledger
- * counts it as the denominator of "screens routed in src/App.tsx". A second copy of this rule
- * would drift from the first, and a denominator that drifts from its numerator is exactly how that
- * row came to divide unique screens by `<Route` tokens — two units in one fraction.
+ * `component` is the React Router 6.4+ data-router form, `Component={Home}`, which the extractor
+ * cannot follow. Naming it here is the point: the blind-spots denominator has to be able to count
+ * a screen the extractor cannot see. Both sides of that fraction were computed by this one
+ * predicate, so it read 100% forever — two real screens could be added in a form the parser does
+ * not read and `42 / 42` did not move, while the row's own note promised "a gap is a routed
+ * component that produced no row". The two sides now share one parser and differ by exactly what
+ * it can turn into a row, which is the quantity the ledger claims to measure.
  */
-function routeScreen(text) {
+function routeMount(text) {
   const at = text.indexOf("element={");
-  if (at === -1) return null; // a pathless grouping route, or the data-router `Component=` form
-  const opened = [...braced(text, at + "element=".length).matchAll(/<(\w+)/g)].map((m) => m[1]);
-  const component = opened.at(-1);
-  return component && !NOT_A_SCREEN.test(component) ? component : null;
+  if (at !== -1) {
+    const opened = [...braced(text, at + "element=".length).matchAll(/<(\w+)/g)].map((m) => m[1]);
+    const component = opened.at(-1);
+    return component && !NOT_A_SCREEN.test(component) ? { component, form: "element" } : null;
+  }
+  const data = /\bComponent=\{\s*(\w+)\s*\}/.exec(text);
+  return data && !NOT_A_SCREEN.test(data[1]) ? { component: data[1], form: "component" } : null;
+}
+
+/** The screen behind one `<Route>` tag, in the one form extraction reads. */
+function routeScreen(text) {
+  const mount = routeMount(text);
+  return mount?.form === "element" ? mount.component : null;
 }
 
 /** The router file, comments blanked — or null when this repo has no React Router to read. */
@@ -245,11 +261,14 @@ function routerSource(root) {
   return existsSync(p) ? stripComments(readFileSync(p, "utf8")) : null;
 }
 
-/** Every distinct non-chrome component the router mounts, whether or not it became a row. */
+/**
+ * Every distinct non-chrome component the router mounts, in any form, whether or not the extractor
+ * can turn it into a row. The blind-spots denominator: counted in the router, not in the map.
+ */
 function routedScreens(root) {
   const src = routerSource(root);
   if (src === null) return [];
-  return uniq(routeTokens(src).filter((t) => !t.close).map((t) => routeScreen(t.text)).filter(Boolean));
+  return uniq(routeTokens(src).filter((t) => !t.close).map((t) => routeMount(t.text)?.component).filter(Boolean));
 }
 
 /**
@@ -596,17 +615,41 @@ function missingSources(root) {
   );
 }
 
-function report(surfaces, features) {
+/** Every file in the repo, root-relative, minus the trees no `owns:` glob is about. */
+function repoFiles(root) {
+  const skip = new Set(["node_modules", ".git", "dist", "build", ".next", "coverage"]);
+  const out = [];
+  const walk = (dir, prefix) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (e.isDirectory()) {
+        if (!skip.has(e.name)) walk(join(dir, e.name), `${prefix}${e.name}/`);
+      } else out.push(prefix + e.name);
+    }
+  };
+  walk(root, "");
+  return out;
+}
+
+function report(root, surfaces, features) {
   const unclaimed = surfaces.filter((s) => s.claimedBy.length === 0);
-  // A feature owning only code cartography does not extract (an edge function, a shared hook) is
-  // not dead — this tool simply cannot see it. Reporting it would be a permanent false positive
-  // that no action can clear, so only globs pointing INTO an extracted area are judged.
-  const extractedDirs = uniq(surfaces.map((s) => s.file?.split("/").slice(0, 2).join("/")).filter(Boolean));
-  const looksExtractable = (g) => extractedDirs.some((d) => g.startsWith(d));
-  const claimedIds = new Set(surfaces.flatMap((s) => s.claimedBy));
-  const dead = features.filter(
-    (f) => f.owns.length > 0 && f.owns.some(looksExtractable) && !claimedIds.has(f.id),
-  );
+  // `!` means the glob points at code that is not there. It is asked of the filesystem, because
+  // that is the question — the glob was previously matched against surface ROWS, so a feature
+  // owning a live file that is not a routed screen (a dashboard reached through a dispatcher
+  // rather than a `<Route>`) was reported as owning nothing, failed the gate, and no `sync` could
+  // clear it: `sync` never writes data/features/, and the file it named was right there on disk.
+  //
+  // A feature owning only code cartography does not extract — an edge function, a shared hook —
+  // is still not dead, and now for the honest reason: those files exist, so the globs match. The
+  // old prefix heuristic reached the same verdict by guessing from where surface rows happened to
+  // live, which made the false positive it was written to prevent fire inside `src/pages` itself.
+  const files = repoFiles(root);
+  const dead = features.filter((f) => f.owns.length > 0 && !files.some((p) => matchesAny(p, f.owns)));
   return { unclaimed, dead };
 }
 
@@ -701,7 +744,7 @@ function printReport(diffs, { unclaimed, dead }, surfaces, resources, missing, u
   // prints no `·` there — `unparsedLegacyTableFile` is content-based, the same way the reader it
   // reports on is, so the two can no longer disagree in silence.
   if (unparsedLegacy) line("·", "unparsed (legacy tables)", [`${unparsedLegacy.join(", ")} — present, no \`export const TABLES = {...}\` found`]);
-  let drift = dead.length;
+  let drift = 0;
   for (const [table, d] of Object.entries(diffs)) {
     line("+", `new ${table}`, d.added);
     line("-", `gone ${table}`, d.removed);
@@ -710,7 +753,11 @@ function printReport(diffs, { unclaimed, dead }, surfaces, resources, missing, u
   }
   line("!", "feature owns nothing", dead.map((f) => f.id));
   line("?", "claimed by no feature", unclaimed.map((s) => s.id));
-  return { drift, coverage: unclaimed.length };
+  // `!` fails, but it is not drift: drift is a generated table gone stale and `sync` rewrites it,
+  // while a glob pointing at no file lives in a row this tool never writes. Counting the two
+  // together printed "run `cartography sync` and commit" as the remedy for a finding `sync`
+  // structurally cannot touch.
+  return { drift, dead: dead.length, coverage: unclaimed.length };
 }
 
 /**
@@ -762,11 +809,17 @@ function blindSpots(root, surfaces, resources) {
     // nowhere else (no migration, no registry entry, no `.from()`, no `TABLES` key) still read
     // 58 / 58. `reached_from_src` is a fact the map does not guarantee: a typed table can sit
     // unused in `src/`, reached only from an edge function or from nothing at all.
+    // A denominator of zero is three different facts, and this row stated only one of them. The
+    // same conflation the router row above was fixed for: a repo with no `types.ts` and a repo
+    // whose `types.ts` this parser cannot follow produced byte-identical output, and
+    // `missingSources` is existence-only so the present-but-unreadable case printed no `·` either.
     [
       "typed tables reached from src",
       typed.filter((t) => resourceByName.get(t)?.reached_from_src === "true").length,
       typed.length,
-      "the rest are declared in the generated types but never named in a src/ `.from()` call",
+      typed.length
+        ? "the rest are declared in the generated types but never named in a src/ `.from()` call"
+        : { absent: `no ${TYPES_FILE} — no generated types to read`, unreadable: `${TYPES_FILE} present but no \`Tables: {\` block the parser can read`, read: "the generated types declare no tables" }[typedTablesState(root)],
     ],
     ["edge functions on the map", fns.filter((f) => resources.some((r) => r.used_by.includes(f))).length, fns.length, "a function touching no table cannot appear"],
     ["surfaces with a resource edge", surfaces.filter((s) => (s.reads?.length ?? 0) + (s.writes?.length ?? 0) > 0).length, surfaces.length, "not extracted yet"],
@@ -843,19 +896,31 @@ try {
     process.exit(command ? 1 : 0);
   }
   const missing = missingSources(root);
-  // Every source of every table absent is not a stack this tool reads. Writing "no screens, no
-  // tables" for it would be a confident, wrong fact — the failure mode the whole map avoids.
-  if (Object.entries(SOURCES).every(([table, groups]) => missing[table].length === groups.length)) {
+  const features = readFeatures(root);
+  // The two extractors are independent: neither absence takes the other down.
+  const surfaces = joinFeatures(assertUniqueIds(extractSurfaces(root)), features);
+  const resources = assertUniqueIds(extractResources(root), "resource");
+  // Nothing read at all is not a stack this tool maps. Writing "no screens, no tables" for it
+  // would be a confident, wrong fact — the failure mode the whole map avoids.
+  //
+  // Asked of what was extracted, not of what exists on disk. The `existsSync` form of this guard
+  // could not fire: `RESOURCE_SOURCES` lists the whole `src` tree as a source, so every repo with
+  // a directory named `src` had at least one "present" source and the guard was dead code for
+  // every JS/TS repo there is. A checkout holding one `src/a.ts` got a committed ledger reading
+  // `0 / 0` on every row, and `check` then held that green forever — the ledger's own preamble
+  // tells the reader those denominators were counted outside the map, so the zeros read as facts
+  // about the repo rather than as the tool having read nothing.
+  //
+  // A repo that already has a committed map is not this case, and gets the per-table refusal
+  // below instead, which names the table and the source that went missing.
+  const committed = committedRows(root, "surfaces").size + committedRows(root, "resources").size;
+  if (surfaces.length === 0 && resources.length === 0 && committed === 0) {
     throw new Error(
       `no extractable source under ${root} — looked for ` +
         `${Object.values(SOURCES).flat().map((g) => g.join(" | ")).join(", ")}.\n` +
         `  Nothing here is a codebase this extractor reads; refusing to write an empty map.`,
     );
   }
-  const features = readFeatures(root);
-  // The two extractors are independent: neither absence takes the other down.
-  const surfaces = joinFeatures(assertUniqueIds(extractSurfaces(root)), features);
-  const resources = assertUniqueIds(extractResources(root), "resource");
   const ledger = blindSpots(root, surfaces, resources);
   const diffs = {
     surfaces: diffTable(root, "surfaces", surfaces, surfaceRow),
@@ -863,14 +928,17 @@ try {
     // Generated output is generated output. The ledger is checked, not just written.
     ledger: diffLedger(root, ledger),
   };
-  const r = report(surfaces, features);
+  const r = report(root, surfaces, features);
   const unparsedLegacy = unparsedLegacyTableFile(root);
 
   if (command === "check") {
-    const { drift, coverage } = printReport(diffs, r, surfaces, resources, missing, unparsedLegacy);
+    const { drift, dead, coverage } = printReport(diffs, r, surfaces, resources, missing, unparsedLegacy);
     if (drift > 0) console.log(`\n  ${drift} stale fact(s) — run \`cartography sync\` and commit.`);
-    else if (coverage > 0) console.log(`\n  Map is current. ${coverage} screen(s) await a job.`);
-    process.exit(drift > 0 ? 1 : 0);
+    // `sync` never writes data/features/, so it cannot clear this one — printing it as the remedy
+    // sent a reader to a command that provably does nothing. The glob is the thing to fix.
+    if (dead > 0) console.log(`  ${dead} feature(s) own no file that exists — fix the \`owns:\` glob, or delete the row.`);
+    else if (drift === 0 && coverage > 0) console.log(`\n  Map is current. ${coverage} screen(s) await a job.`);
+    process.exit(drift + dead > 0 ? 1 : 0);
   }
 
   // Refuse to empty a populated table. A router refactor, a moved registry, or a source this
