@@ -36,11 +36,30 @@ function stripLine(src, lineToken) {
     out += src[i];
     if (src[i] === '"' || src[i] === "'" || src[i] === "`") {
       const q = src[i];
-      for (i++; i < src.length && src[i] !== q; i++) {
-        out += src[i];
-        if (src[i] === "\\" && i + 1 < src.length) out += src[++i];
+      // A `'` or `"` run may not cross a newline — only a template literal may. Without that
+      // limit an apostrophe in JSX text ("Don't") or a quote inside a regex literal (/["']/)
+      // opened a string that never closed, and the scanner ran on for a hundred lines with every
+      // real comment inside it left un-blanked. Twelve files in one consumer desync that way.
+      const start = i;
+      let body = "";
+      let closed = false;
+      for (i++; i < src.length; i++) {
+        if (q !== "`" && src[i] === "\n") break;
+        body += src[i];
+        if (src[i] === "\\" && i + 1 < src.length) {
+          body += src[++i];
+          continue;
+        }
+        if (src[i] === q) {
+          closed = true;
+          break;
+        }
       }
-      if (i < src.length) out += q;
+      if (closed) out += body;
+      else {
+        // Not a string after all: emit nothing extra and resume scanning right after the quote.
+        i = start;
+      }
     }
   }
   return out;
