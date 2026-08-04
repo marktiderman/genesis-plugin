@@ -23,7 +23,13 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import { basename, join, relative, resolve } from "node:path";
 
 import { readFrontmatter, yamlList, yamlScalar } from "./lib/frontmatter.js";
-import { RESOURCE_SOURCES, edgeFunctions, extractResources, typedTables } from "./lib/resources.js";
+import {
+  RESOURCE_SOURCES,
+  edgeFunctions,
+  extractResources,
+  typedTables,
+  unparsedLegacyTableFile,
+} from "./lib/resources.js";
 
 const HELP = `cartography — map a codebase into gitdata rows
 
@@ -683,7 +689,7 @@ function diffLedger(root, expected) {
  * installed, and a check nobody can turn green is a check that gets removed. It is protected
  * instead by `claimed_by` living in the rows, where losing it shows up as drift.
  */
-function printReport(diffs, { unclaimed, dead }, surfaces, resources, missing) {
+function printReport(diffs, { unclaimed, dead }, surfaces, resources, missing, unparsedLegacy) {
   const line = (mark, label, items) =>
     items.length && console.log(`  ${mark} ${label.padEnd(22)} ${items.join(", ")}`);
   console.log(`  ${surfaces.length} surface(s), ${resources.length} resource(s) extracted`);
@@ -691,6 +697,10 @@ function printReport(diffs, { unclaimed, dead }, surfaces, resources, missing) {
   // "this repo has no data layer" and "this repo has no screens" indistinguishably from "the file
   // those facts live in is not where this tool looks".
   for (const [table, absent] of Object.entries(missing)) line("·", `unread (${table})`, absent);
+  // `missing` above is existence only, so a file that exists but does not parse as a `TABLES` map
+  // prints no `·` there — `unparsedLegacyTableFile` is content-based, the same way the reader it
+  // reports on is, so the two can no longer disagree in silence.
+  if (unparsedLegacy) line("·", "unparsed (legacy tables)", [`${unparsedLegacy.join(", ")} — present, no \`export const TABLES = {...}\` found`]);
   let drift = dead.length;
   for (const [table, d] of Object.entries(diffs)) {
     line("+", `new ${table}`, d.added);
@@ -723,18 +733,41 @@ function blindSpots(root, surfaces, resources) {
   const onSurfaces = new Set(surfaces.map((s) => s.component));
   const typed = typedTables(root);
   const { names: fns } = edgeFunctions(root);
-  const onMap = new Set(resources.map((r) => r.name));
+  const resourceByName = new Map(resources.map((r) => [r.name, r]));
   // `scope: unknown` on a resource that *does* declare one — through a helper call the parser
   // cannot read — is the blind spot this row exists to show, so it is counted as a miss.
   const scopeUnread = resources.filter((r) => r.declared !== "undeclared" && r.scope === "unknown").length;
+  // "No routed screens" is two different facts and they must not share a sentence: the file can be
+  // absent, or it can be present in a form `routeScreen()` cannot read — the data-router
+  // `Component={Foo}` form named at its definition above. A fixture with a real, readable-by-eye
+  // App.tsx using `createBrowserRouter` produced a note byte-identical to a repo with no `src/` at
+  // all, and nothing else in the report said otherwise: `missingSources` checks existence, so a
+  // present-but-unreadable file prints no `·` either. The only sentence about the surface layer was
+  // the wrong one, and the run still exited 0.
+  const routerAbsent = routerSource(root) === null;
   const rows = [
     [
       "screens routed in src/App.tsx",
       routed.filter((c) => onSurfaces.has(c)).length,
       routed.length,
-      routed.length ? "a gap is a routed component that produced no row" : `no ${APP_FILE} — no router to read`,
+      routed.length
+        ? "a gap is a routed component that produced no row"
+        : routerAbsent
+          ? `no ${APP_FILE} — no router to read`
+          : `${APP_FILE} present but no <Route element={<X/>}> the parser can read — data-router Component={} form?`,
     ],
-    ["typed tables on the map", typed.filter((t) => onMap.has(t)).length, typed.length, ""],
+    // NOT "typed tables on the map": `extractResources` seeds its name set from `...typed`
+    // (lib/resources.js), so every typed table becomes a row unconditionally — that numerator
+    // could never read below its own denominator. A table added to the generated types and named
+    // nowhere else (no migration, no registry entry, no `.from()`, no `TABLES` key) still read
+    // 58 / 58. `reached_from_src` is a fact the map does not guarantee: a typed table can sit
+    // unused in `src/`, reached only from an edge function or from nothing at all.
+    [
+      "typed tables reached from src",
+      typed.filter((t) => resourceByName.get(t)?.reached_from_src === "true").length,
+      typed.length,
+      "the rest are declared in the generated types but never named in a src/ `.from()` call",
+    ],
     ["edge functions on the map", fns.filter((f) => resources.some((r) => r.used_by.includes(f))).length, fns.length, "a function touching no table cannot appear"],
     ["surfaces with a resource edge", surfaces.filter((s) => (s.reads?.length ?? 0) + (s.writes?.length ?? 0) > 0).length, surfaces.length, "not extracted yet"],
     // Counts what the label says: rows carrying an actual scope value. The old numerator counted
@@ -762,7 +795,7 @@ drift, not improvement. The only way to move a number is to teach the extractor 
 Expect these to get *worse* when a new extractor lands. That is the extractor working.
 
 \`\`\`text
-${rows.map(([label, n, d, note]) => `${label.padEnd(width)}  ${String(n).padStart(4)} / ${String(d).padEnd(4)}${note ? `  ${note}` : ""}`).join("\n")}
+${rows.map(([label, n, d, note]) => `${label.padEnd(width)}  ${String(n).padStart(4)} / ${note ? `${String(d).padEnd(4)}  ${note}` : String(d)}`).join("\n")}
 \`\`\`
 
 <!-- GENERATED by \`cartography sync\`. Hand edits are overwritten. -->
@@ -831,9 +864,10 @@ try {
     ledger: diffLedger(root, ledger),
   };
   const r = report(surfaces, features);
+  const unparsedLegacy = unparsedLegacyTableFile(root);
 
   if (command === "check") {
-    const { drift, coverage } = printReport(diffs, r, surfaces, resources, missing);
+    const { drift, coverage } = printReport(diffs, r, surfaces, resources, missing, unparsedLegacy);
     if (drift > 0) console.log(`\n  ${drift} stale fact(s) — run \`cartography sync\` and commit.`);
     else if (coverage > 0) console.log(`\n  Map is current. ${coverage} screen(s) await a job.`);
     process.exit(drift > 0 ? 1 : 0);
@@ -843,26 +877,52 @@ try {
   // extractor can no longer find looks exactly like "there is nothing here", and wiping the map on
   // that reading loses more than it reports. Per table, so a repo that has one and not the other
   // keeps the one it has.
+  //
+  // The two tables' writes are independent too — the same promise the two *extractors* make
+  // (HELP above, SKILL.md's "the other half runs anyway"). A refusal on one table used to `throw`
+  // from inside this loop, which unwound past the other table's `writeTable` call and past the
+  // ledger write below it: a refusal on surfaces alone left `data/resources/` holding a fact
+  // (`rls_enabled: "true"`) the freshly-read migrations already contradicted, with no write and no
+  // error able to fix it. Collecting refusals and writing everything else first keeps both
+  // properties this guard exists for — a populated table is never silently emptied, and a refusal
+  // still exits non-zero — without letting one table's refusal block the other's write.
+  const refusals = [];
+  const written = [];
   for (const [table, rows, serialize] of [
     ["surfaces", surfaces, surfaceRow],
     ["resources", resources, resourceRow],
   ]) {
     const existing = committedRows(root, table).size;
     if (rows.length === 0 && existing > 0) {
-      throw new Error(
-        `extracted 0 ${table} but ${existing} row(s) are committed — refusing to empty the table.\n` +
-          `  ${missing[table].length ? `Source(s) not found: ${missing[table].join(", ")}.` : "The extractor no longer understands its sources."}\n` +
-          `  Fix it, or delete data/${table}/ deliberately.`,
-      );
+      refusals.push({
+        table,
+        message:
+          `extracted 0 ${table} but ${existing} row(s) are committed — refusing to empty the table.\n` +
+          `      ${missing[table].length ? `Source(s) not found: ${missing[table].join(", ")}.` : "The extractor no longer understands its sources."}\n` +
+          `      Fix it, or delete data/${table}/ deliberately.`,
+      });
+      continue;
     }
     // A table whose every source is absent gets no empty directory: the absence is reported, not
     // materialised as a table that claims this repo has no screens.
     if (missing[table].length === SOURCES[table].length) continue;
     writeTable(root, table, rows, serialize);
+    written.push(table);
+  }
+  if (refusals.length > 0) {
+    // The ledger is derived from both tables (it cross-references surfaces and resources), so
+    // writing it here would commit a blind-spot count computed in part from the table this run is
+    // simultaneously refusing to write — a stale fact stated with the same confidence as a fresh
+    // one. Leave it as it was; the next clean `sync` will catch it up along with everything else.
+    throw new Error(
+      `${written.length ? `Wrote: ${written.map((t) => `data/${t}/`).join(", ")}.` : "Wrote nothing."} ` +
+        `Did not write: ${refusals.map((ref) => `data/${ref.table}/`).join(", ")}, ${LEDGER} (derived from both tables).\n` +
+        refusals.map((ref) => `  - ${ref.message}`).join("\n"),
+    );
   }
   mkdirSync(join(root, "data/_views"), { recursive: true });
   writeFileSync(join(root, LEDGER), ledger, "utf8");
-  printReport(diffs, r, surfaces, resources, missing);
+  printReport(diffs, r, surfaces, resources, missing, unparsedLegacy);
   if (command === "init") {
     const proposed = proposeInventory(root, surfaces);
     console.log(

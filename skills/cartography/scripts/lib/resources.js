@@ -95,6 +95,17 @@ export const RESOURCE_SOURCES = [
   [FUNCTIONS_DIR],
 ];
 
+/**
+ * The `export const TABLES = {...}` block, tolerating an optional type annotation
+ * (`export const TABLES: Record<string, string> = {`) between the name and the `=`. Ordinary
+ * TypeScript — adding one changed nothing about what the object contains — silently cost the map
+ * all 24 legacy tables, because the old pattern required `=` to follow `TABLES` with only
+ * whitespace between them. The annotation is captured up to the first `=` on the same line, not
+ * `[\s\S]`, so this still cannot be satisfied by unrelated code that merely also assigns an
+ * object — the colon after `TABLES` is what makes it a type annotation and not a syntax error.
+ */
+const TABLES_BLOCK = /export const TABLES(?:\s*:\s*[^=\n]+)?\s*=\s*\{([\s\S]*?)\n\}/;
+
 export function legacyTables(root) {
   // The file gets renamed — this one went `airtable.ts` -> `content.ts` and the map silently lost
   // all 24 legacy tables, taking every registry declaration keyed on them along too.
@@ -103,10 +114,32 @@ export function legacyTables(root) {
   for (const rel of LEGACY_TABLE_FILES) {
     const p = join(root, rel);
     if (!existsSync(p)) continue;
-    const block = /export const TABLES\s*=\s*\{([\s\S]*?)\n\}/.exec(stripJs(readFileSync(p, "utf8")));
+    const block = TABLES_BLOCK.exec(stripJs(readFileSync(p, "utf8")));
     if (block) return Object.fromEntries([...block[1].matchAll(/^\s{0,4}(\w+):\s*"([^"]+)"/gm)].map((m) => [m[1], m[2]]));
   }
   return {};
+}
+
+/**
+ * A `LEGACY_TABLE_FILES` candidate that exists on disk but did not yield a `TABLES` block from
+ * *any* present candidate — the disagreement between `missingSources` (existence) and this
+ * reader (content) made visible, without failing.
+ *
+ * `RESOURCE_SOURCES`/`missingSources` answers "did I have anything to read" by `existsSync`, but
+ * `legacyTables` reads by content — its own comment above says so. The two silently disagreed: a
+ * ordinary TypeScript edit (or any future syntax this parser does not yet handle) left
+ * `src/lib/content.ts` present and unreadable, `missingSources` correctly saw no absent file and
+ * printed no `·`, and 24 tables vanished from the map with zero marks anywhere pointing at why.
+ *
+ * This does not fail, and it must not: `src/lib/content.ts` existing with no `TABLES` export is
+ * ordinary in a repo that never had legacy Airtable tables — a common filename, not a defect — so
+ * treating its mere presence as an error would misfire on every unrelated repo that happens to use
+ * it. A `-` on the committed map already catches the row loss as drift; this only supplies the
+ * reason a reader would otherwise have to guess at.
+ */
+export function unparsedLegacyTableFile(root) {
+  const present = LEGACY_TABLE_FILES.filter((rel) => existsSync(join(root, rel)));
+  return present.length > 0 && Object.keys(legacyTables(root)).length === 0 ? present : null;
 }
 
 /** Table names in the generated Supabase types — the typed half of the data plane. */
