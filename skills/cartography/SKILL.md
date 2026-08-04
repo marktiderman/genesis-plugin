@@ -54,7 +54,8 @@ every run, and a check that always fails is a check nobody reads.
 
 **Extracted** — routes and the scopes each screen mounts in; the component behind each route;
 the dialogs it imports, which are its verbs; whether it leans on the design system, a local kit,
-or both.
+or both; and, per surface, the resources it reads and writes (see `surfaces`' `reads`/`writes`
+below).
 
 **Not extracted — the job.** Nothing in the code says *"tell my coach how I'm really doing without
 waiting for a session."* The code says one component imports another and reads a table. It can
@@ -67,6 +68,28 @@ wearing a product's clothes. Name the job first; attach screens to it with `owns
 ## The two tables it writes
 
 **`surfaces`** — one row per screen the router reaches. Where you can go.
+
+Each surface also carries `reads`/`writes` — the resource ids it touches, so the two tables join:
+"if I change this table, what breaks" is a `grep` over `data/surfaces/*.md` away instead of a
+question nobody's code answers. The evidence is a surface's own component file, plus the hooks it
+imports directly (one hop, never followed further), read for three patterns unevenly — matching
+how unevenly the app itself is written:
+
+- a closed list of generic hooks over a legacy jsonb constant (`useContentRecords`,
+  `useCreateContentRecord`, …) — read or write, decided by which hook, name alone.
+- a hand-written hook calling `supabase.from("x")` directly — read or write, decided by the verb
+  chained onto that same call (`.insert`/`.update`/`.upsert`/`.delete` is a write; anything else,
+  including nothing this scan recognizes, is a read).
+- a Genesis-native `useResource`/`useOne` call — **read only, never write.** That hook's return
+  value always bundles `create`/`update`/`remove` regardless of whether a caller touches them, and
+  this scan cannot see which of those a caller destructures and calls. Every resource reached this
+  way is read-only on the map even where the page visibly calls `create(...)` — a real write is
+  invisible here, not wrong. Overstating a write is the one error this field must not make.
+
+A table name passed through a variable rather than written as a literal, or a mutation that
+happens only inside a rendered dialog or form (a separate file — only a surface's *own* imports
+are its evidence), is invisible the same way: absent, not guessed at. The blind-spots ledger's
+"surfaces with a resource edge" row says so in its own note.
 
 **`resources`** — one row per data noun the app addresses, reconciled across the five places a
 table can be named: a legacy table constant, the generated Supabase types, a hand-written resource
@@ -202,6 +225,12 @@ of reach, and a missing screen looks identical to a screen that does not exist:
 - `!` asks the filesystem, so a feature owning only an edge function or a shared hook is not dead:
   those files exist. It fires only when nothing on disk matches any glob the feature declares.
 
+A surface's `reads`/`writes` follow the same rule — see "The two tables it writes" above for what
+the three data patterns cover and what each one misses. In one sentence: a table named through a
+variable is invisible; a write made through a Genesis `useResource`/`useOne` return value is
+recorded read-only, never write; and a mutation reachable only from a rendered dialog or form —
+not the surface's own file or its own direct hook imports — does not appear at all.
+
 Affordances are import names ending in `Form`, `Dialog`, `Sheet`, `Panel`, or `Modal`, taken from
 the app's own modules — a design system's `Dialog` primitive is not a verb. A dialog named
 otherwise is invisible; an import that is never rendered still counts. It is a convention made
@@ -217,18 +246,21 @@ Needs Node 18 or newer.
 
 ## Fitting another stack
 
-Four functions read this stack, and all four are in one file:
+Five functions read this stack:
 
 | seam | assumes |
 | --- | --- |
-| `routeTokens` | React Router JSX — `<Route>` tags in `src/App.tsx` |
-| `SCOPE_PREFIX` | scopes declared as a nested `<Route path="c/:clientId">` |
-| `componentFacts` | pages under `src/pages/` or `src/components/`, ES import syntax |
-| `navFacts` | an optional `src/lib/nav-registry.ts` for groups and labels |
+| `routeTokens` (`cartography.mjs`) | React Router JSX — `<Route>` tags in `src/App.tsx` |
+| `SCOPE_PREFIX` (`cartography.mjs`) | scopes declared as a nested `<Route path="c/:clientId">` |
+| `componentFacts` (`cartography.mjs`) | pages under `src/pages/` or `src/components/`, ES import syntax |
+| `navFacts` (`cartography.mjs`) | an optional `src/lib/nav-registry.ts` for groups and labels |
+| `surfaceResourceEdges` (`lib/resource-edges.js`) | hooks imported as `@/hooks/x`, exported `export function` (not an arrow const), and the three read/write patterns named above |
 
 Everything downstream — the two-table split, the `owns:` join, the drift check — is stack-agnostic.
 `navFacts` degrades to empty when its file is absent; an app with no scope prefixes simply files
-every screen under `personal`.
+every screen under `personal`. `surfaceResourceEdges` degrades to empty `reads`/`writes` for a
+repo whose hooks use a different import alias or export shape — a real gap the ledger states,
+never a crash.
 
 **No single file is required.** The two extractors are independent: a repo with no React Router
 still has a data layer, and a repo with no migrations still has screens. A source this repo does

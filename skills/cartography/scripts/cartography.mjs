@@ -26,12 +26,15 @@ import { readFrontmatter, yamlList, yamlScalar } from "./lib/frontmatter.js";
 import {
   RESOURCE_SOURCES,
   TYPES_FILE,
+  declaredResources,
   edgeFunctions,
   extractResources,
+  legacyTables,
   typedTables,
   typedTablesState,
   unparsedLegacyTableFile,
 } from "./lib/resources.js";
+import { surfaceResourceEdges } from "./lib/resource-edges.js";
 
 const HELP = `cartography — map a codebase into gitdata rows
 
@@ -425,7 +428,7 @@ function componentFacts(root, component) {
 }
 
 /** One row per screen, merged across every scope it is mounted in. */
-function extractSurfaces(root) {
+function extractSurfaces(root, resourceIndex) {
   const nav = navFacts(root);
   const byComponent = new Map();
   for (const { scope, path, component } of extractRoutes(root)) {
@@ -474,6 +477,11 @@ function extractSurfaces(root) {
         (navNames.has(canonicalScope)
           ? undefined
           : navOnly.map((scope) => navLookup(nav, scope, primary[0])).find(Boolean));
+      const facts = componentFacts(root, s.component);
+      // The resource-edge scan reads the same file `componentFacts` just resolved, so a screen
+      // whose component could not be found (`file: null`) gets no reads/writes rather than a scan
+      // of nothing pretending to be a fact.
+      const edges = facts.file ? surfaceResourceEdges(root, facts.file, resourceIndex) : { reads: [], writes: [] };
       return {
         id: s.component.replace(/Page$/, "").replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase(),
         title: canonical?.title ?? s.component.replace(/Page$/, ""),
@@ -481,7 +489,8 @@ function extractSurfaces(root) {
         scopes,
         group: scoped("group"),
         role: scoped("role"),
-        ...componentFacts(root, s.component),
+        ...facts,
+        ...edges,
       };
     })
     .sort((a, b) => a.id.localeCompare(b.id));
@@ -523,6 +532,8 @@ group: ${yamlList(s.group)}
 role: ${yamlList(s.role)}
 layout: ${yamlScalar(s.layout)}
 affordances: ${yamlList(s.affordances)}
+reads: ${yamlList(s.reads)}
+writes: ${yamlList(s.writes)}
 claimed_by: ${yamlList(s.claimedBy)}
 ---
 
@@ -836,7 +847,20 @@ function blindSpots(root, surfaces, resources) {
         : { absent: `no ${TYPES_FILE} — no generated types to read`, unreadable: `${TYPES_FILE} present but no \`Tables: {\` block the parser can read`, read: "the generated types declare no tables" }[typedTablesState(root)],
     ],
     ["edge functions on the map", fns.filter((f) => resources.some((r) => r.used_by.includes(f))).length, fns.length, "a function touching no table cannot appear"],
-    ["surfaces with a resource edge", surfaces.filter((s) => (s.reads?.length ?? 0) + (s.writes?.length ?? 0) > 0).length, surfaces.length, "not extracted yet"],
+    // Counts a surface whose OWN file, or a hook it imports one hop deep, yielded a resolved
+    // reads/writes hit — see `resource-edges.js`'s module doc for the three patterns this covers
+    // unevenly on purpose. What the numerator misses, stated so the gap does not read as "none":
+    // a table name passed through a variable rather than written as a literal; a write made
+    // through a Genesis `useResource`/`useOne` return value (recorded read-only, never write,
+    // because this scan cannot see which of the bundled create/update/remove a caller calls); and
+    // any mutation that happens only inside a rendered dialog or form — a separate file this scan
+    // does not open, since only the surface's own imports count as its evidence.
+    [
+      "surfaces with a resource edge",
+      surfaces.filter((s) => (s.reads?.length ?? 0) + (s.writes?.length ?? 0) > 0).length,
+      surfaces.length,
+      "a surface's own file plus the hooks it imports one hop deep; a table behind a variable, a Genesis useResource/useOne write, or a mutation only a rendered dialog calls is invisible here",
+    ],
     // Counts what the label says: rows carrying an actual scope value. The old numerator counted
     // *declaredness* — `r.declared !== "undeclared"` — under a label about scope, which read 35/82
     // while only ~20 rows named a scope. Relabelling it to "declared" instead would have been the
@@ -911,9 +935,19 @@ try {
   }
   const missing = missingSources(root);
   const features = readFeatures(root);
-  // The two extractors are independent: neither absence takes the other down.
-  const surfaces = joinFeatures(assertUniqueIds(extractSurfaces(root)), features);
+  // Resources first: the surface extractor's reads/writes join against resource ids, which only
+  // exist once `extractResources` has reconciled a name to one. Computing resources first does
+  // not compromise "the two extractors are independent" below — a repo with no data layer simply
+  // hands the surface extractor an empty index, so every surface's reads/writes come back empty
+  // (a real fact: there is nothing to reference), not a crash and not a skipped table.
   const resources = assertUniqueIds(extractResources(root), "resource");
+  const resourceIndex = {
+    tableByKey: legacyTables(root),
+    addressed: declaredResources(root, legacyTables(root)).map((d) => d.name),
+    nameToId: new Map(resources.map((r) => [r.name, r.id])),
+  };
+  // The two extractors are independent: neither absence takes the other down.
+  const surfaces = joinFeatures(assertUniqueIds(extractSurfaces(root, resourceIndex)), features);
   // Nothing read at all is not a stack this tool maps. Writing "no screens, no tables" for it
   // would be a confident, wrong fact — the failure mode the whole map avoids.
   //

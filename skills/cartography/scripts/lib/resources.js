@@ -64,7 +64,10 @@ function stripLine(src, lineToken) {
   }
   return out;
 }
-const stripJs = (s) => stripLine(s, "//");
+// Exported: `resource-edges.js` scans the same component/hook files this module scans repo-wide,
+// and has to strip them the same way — two readers disagreeing on what counts as a comment would
+// desync silently, the same failure `unparsedLegacyTableFile` exists to catch for a different pair.
+export const stripJs = (s) => stripLine(s, "//");
 const stripSql = (s) => stripLine(s, "--");
 
 /** `export const TABLES = { PEOPLE: "People", ... }` — the legacy jsonb table names. */
@@ -222,6 +225,30 @@ export function declaredResources(root, tables) {
   return out;
 }
 
+/** `.from("x")` — the direct-call form. Exported so a single-file scan (`resource-edges.js`,
+ * surface reads/writes) uses the identical pattern `tableRefs` uses across a whole tree — two
+ * readers of "what counts as a `.from()` call" that quietly diverged would report different tables
+ * touched from the same source, and neither number would be wrong loudly enough to notice. */
+export const FROM_CALL_RE = /\.from\(\s*["']([\w.]+)["']/g;
+
+/**
+ * Regexes licensing a bare string literal as `name` only where a declaration already established
+ * it — the third form `tableRefs` reads, and the one `resource-edges.js` reuses for the same
+ * reason: `useResource("tasks")` names a resource nowhere but at the call site, so the license to
+ * treat that literal as real has to come from somewhere that already declared it a resource.
+ *
+ * Anchored to a call whose name plausibly addresses a resource. Unanchored, a declared name as the
+ * first argument to *any* call counted — `t("tasks")`, `console.log("tasks", x)` — and under the
+ * reach ladder that mints the strongest rung, the one the ledger counts. A name matched only by the
+ * looser shape falls to `listed` instead, which is the correct direction to fail in.
+ */
+export function addressedMatchers(addressed) {
+  return addressed.map((name) => [
+    name,
+    new RegExp(String.raw`${RESOURCE_CALL}\(\s*["']${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']\s*[,)]`),
+  ]);
+}
+
 /**
  * A callee name whose first argument plausibly *addresses* a resource, per the registry's own
  * documented contract for the third form below (`name` is "exactly as `useResource(name)` / the
@@ -259,10 +286,7 @@ const RESOURCE_CALL = String.raw`\b(?:use[A-Z]\w*|getList|getOne|getMany|create|
 export function tableRefs(dir, tables, { label = (f) => f, addressed = [] } = {}) {
   const hits = {};
   const byKey = Object.entries(tables);
-  const addressedRe = addressed.map((name) => [
-    name,
-    new RegExp(String.raw`${RESOURCE_CALL}\(\s*["']${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']\s*[,)]`),
-  ]);
+  const addressedRe = addressedMatchers(addressed);
   const walk = (d) => {
     let entries;
     try {
@@ -281,7 +305,7 @@ export function tableRefs(dir, tables, { label = (f) => f, addressed = [] } = {}
       // marked five tables the app never touches as reached, contradicting their own `unused` note.
       if (/resource-registry\.(ts|test\.ts)$/.test(e.name)) continue;
       const src = stripJs(readFileSync(path, "utf8"));
-      for (const m of src.matchAll(/\.from\(\s*["']([\w.]+)["']/g)) {
+      for (const m of src.matchAll(FROM_CALL_RE)) {
         (hits[m[1]] ??= new Set()).add(label(path));
       }
       for (const [key, name] of byKey) {

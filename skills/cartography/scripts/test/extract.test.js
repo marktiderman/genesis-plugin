@@ -764,6 +764,193 @@ describe("reach ladder", () => {
   });
 });
 
+describe("surface resource edges", () => {
+  /** Writes a file, creating parent directories as needed. */
+  const put = (root, rel, text) => {
+    mkdirSync(join(root, rel, ".."), { recursive: true });
+    writeFileSync(join(root, rel), text, "utf8");
+  };
+
+  test("resolves a legacy hook pair to a read and a write, by hook name, through TABLES.KEY", () => {
+    // Pattern 1 (CLAUDE.md's Data Flow): `useScopedRecords`/`useUpdateContentRecord` name no table
+    // themselves — the literal comes from `TABLES.SESSIONS`, right there at the call site in the
+    // page, the same shape `SessionsPage.tsx` actually uses.
+    const root = repo(`<Route path="s" element={<Sessions />} />`, {
+      Sessions:
+        `import { useScopedRecords } from "@/hooks/use-scoped-records";\n` +
+        `import { useUpdateContentRecord } from "@/hooks/use-content-records";\n` +
+        `import { TABLES } from "@/lib/content";\n` +
+        `export default function Sessions() {\n` +
+        `  useScopedRecords(TABLES.SESSIONS, { contentType: "sessions" });\n` +
+        `  useUpdateContentRecord(TABLES.SESSIONS);\n` +
+        `}\n`,
+    });
+    put(root, "src/lib/content.ts", 'export const TABLES = {\n  SESSIONS: "Sessions",\n}\n');
+    run(root);
+    assert.deepEqual(rows(root).sessions.reads, ["sessions"]);
+    assert.deepEqual(rows(root).sessions.writes, ["sessions"]);
+  });
+
+  test("follows one hop into an imported hook to find a .from() the page itself never names", () => {
+    // Pattern 2: the page calls `useMilestones()`/`useDeleteMilestone()` with no table argument at
+    // all — the literal is one file away, inside the hook's own body, the `use-milestones.ts` shape.
+    const root = repo(`<Route path="m" element={<Milestones />} />`, {
+      Milestones:
+        `import { useMilestones, useDeleteMilestone } from "@/hooks/use-milestones";\n` +
+        `export default function Milestones() {\n` +
+        `  useMilestones();\n` +
+        `  useDeleteMilestone();\n` +
+        `}\n`,
+    });
+    put(
+      root,
+      "src/hooks/use-milestones.ts",
+      `export function useMilestones() {\n` +
+        `  return supabase.from("progress_milestones").select("*").order("created_at");\n` +
+        `}\n` +
+        `export function useDeleteMilestone() {\n` +
+        `  return { mutateAsync: (id) => supabase.from("progress_milestones").delete().eq("id", id) };\n` +
+        `}\n`,
+    );
+    run(root);
+    assert.deepEqual(rows(root).milestones.reads, ["progress-milestones"]);
+    assert.deepEqual(rows(root).milestones.writes, ["progress-milestones"]);
+  });
+
+  test("does not attribute a sibling export's table to a surface that never imported it", () => {
+    // The regression this guards against: `use-execution.ts` houses `useTasks` (-> "tasks") and
+    // `useProjects` (-> "projects") side by side. A whole-file scan would leak "projects" onto
+    // every surface that imports only `useTasks` — over-claiming an edge, the wrong direction for
+    // a tool whose whole value is that a row is a fact.
+    const root = repo(`<Route path="t" element={<Tasks />} />`, {
+      Tasks:
+        `import { useTasks } from "@/hooks/use-execution";\n` +
+        `export default function Tasks() {\n  useTasks();\n}\n`,
+    });
+    put(
+      root,
+      "src/hooks/use-execution.ts",
+      `import { useResource } from "@marktiderman/genesis-core/hooks";\n` +
+        `function useScopedResource(resource, filters, options) {\n` +
+        `  return useResource(resource, { ...options, defaultFilters: filters });\n` +
+        `}\n` +
+        `export function useTasks() {\n  return useScopedResource("tasks", [], {});\n}\n` +
+        `export function useProjects() {\n  return useScopedResource("projects", [], {});\n}\n`,
+    );
+    put(
+      root,
+      "src/lib/resource-registry.ts",
+      `const R = [\n` +
+        `  defineResource({ name: "tasks", backing: "supabase" }),\n` +
+        `  defineResource({ name: "projects", backing: "supabase" }),\n` +
+        `];\n`,
+    );
+    run(root);
+    assert.deepEqual(rows(root).tasks.reads, ["tasks"], "projects leaked in from a sibling export");
+  });
+
+  test("records a Genesis useResource/useOne edge as read only, never write", () => {
+    // The hook's return value always bundles create/update/remove regardless of whether the
+    // caller touches them (`@marktiderman/genesis-core`'s `useResource`), and this scan cannot see
+    // which of those a caller destructures and calls — so even a component that visibly
+    // destructures `create` and calls it must still read `writes: []`. Overstating a write is the
+    // one error this field must never make; understating it is the documented, accepted gap.
+    const root = repo(`<Route path="t" element={<Tasks />} />`, {
+      Tasks:
+        `import { useTasks } from "@/hooks/use-execution";\n` +
+        `export default function Tasks() {\n` +
+        `  const { list, create } = useTasks();\n` +
+        `  const onAdd = () => create({ title: "x" });\n` +
+        `}\n`,
+    });
+    put(
+      root,
+      "src/hooks/use-execution.ts",
+      `import { useResource } from "@marktiderman/genesis-core/hooks";\n` +
+        `export function useTasks() {\n  return useResource("tasks", {});\n}\n`,
+    );
+    put(root, "src/lib/resource-registry.ts", `const R = [defineResource({ name: "tasks", backing: "supabase" })];\n`);
+    run(root);
+    assert.deepEqual(rows(root).tasks.reads, ["tasks"]);
+    assert.deepEqual(rows(root).tasks.writes, [], "a Genesis write must never be reported");
+  });
+
+  test("does not invent an edge when the table name is passed through a variable", () => {
+    // `useContentRecords(table, ...)` inside a wrapper the page itself defines, called with a
+    // local variable rather than a literal or `TABLES.KEY` — this scan has no way to resolve
+    // `table`, so it must record nothing rather than guess.
+    const root = repo(`<Route path="x" element={<Mystery />} />`, {
+      Mystery:
+        `import { useContentRecords } from "@/hooks/use-content-records";\n` +
+        `export default function Mystery({ table }) {\n` +
+        `  useContentRecords(table, {});\n` +
+        `}\n`,
+    });
+    run(root);
+    assert.deepEqual(rows(root).mystery.reads, []);
+    assert.deepEqual(rows(root).mystery.writes, []);
+  });
+
+  test("does not read a write verb from an unrelated statement past the chain's own boundary", () => {
+    // Two `.from()` calls in one function, one read and one write on a DIFFERENT table. A write
+    // search unbounded by the statement it belongs to would let "widgets" borrow "gadgets"'s
+    // `.insert(` and report a write that never happened.
+    const root = repo(`<Route path="w" element={<Widgets />} />`, {
+      Widgets:
+        `import { useWidgets } from "@/hooks/use-widgets";\n` +
+        `export default function Widgets() {\n  useWidgets();\n}\n`,
+    });
+    put(
+      root,
+      "src/hooks/use-widgets.ts",
+      `export function useWidgets() {\n` +
+        `  const w = supabase.from("widgets").select("*").order("id");\n` +
+        `  const g = supabase.from("gadgets").insert({ name: "x" }).select();\n` +
+        `  return { w, g };\n` +
+        `}\n`,
+    );
+    run(root);
+    assert.deepEqual(rows(root).widgets.reads, ["widgets"]);
+    assert.deepEqual(rows(root).widgets.writes, ["gadgets"], "the write must land on gadgets, not widgets");
+  });
+
+  test("joins reads/writes to a resource row's id, not a bare table name", () => {
+    const root = repo(`<Route path="s" element={<Sessions />} />`, {
+      Sessions:
+        `import { useContentRecords } from "@/hooks/use-content-records";\n` +
+        `import { TABLES } from "@/lib/content";\n` +
+        `export default function Sessions() {\n` +
+        `  useContentRecords(TABLES.SESSIONS, {});\n` +
+        `}\n`,
+    });
+    put(root, "src/lib/content.ts", 'export const TABLES = {\n  SESSIONS: "Sessions",\n}\n');
+    run(root);
+    assert.deepEqual(Object.keys(rows(root, "resources")), ["sessions"]);
+    assert.deepEqual(rows(root).sessions.reads, ["sessions"], "must be the row id, not the raw name");
+  });
+
+  test("the ledger counts a resolved edge, and states what the numerator misses", () => {
+    const root = repo(`<Route path="s" element={<Sessions />} />`, {
+      Sessions:
+        `import { useContentRecords } from "@/hooks/use-content-records";\n` +
+        `import { TABLES } from "@/lib/content";\n` +
+        `export default function Sessions() {\n  useContentRecords(TABLES.SESSIONS, {});\n}\n`,
+    });
+    put(root, "src/lib/content.ts", 'export const TABLES = {\n  SESSIONS: "Sessions",\n}\n');
+    run(root);
+    assert.match(ledgerOf(root), /surfaces with a resource edge\s+1 \/ 1\s+a surface's own file/);
+  });
+
+  test("a surface with no resolvable edge reports the fraction honestly, not a crash", () => {
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    const r = run(root);
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(rows(root).alpha.reads, []);
+    assert.deepEqual(rows(root).alpha.writes, []);
+    assert.match(ledgerOf(root), /surfaces with a resource edge\s+0 \/ 1\s/);
+  });
+});
+
 describe("the owns join", () => {
   const withFeature = (frontmatter) => {
     const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
