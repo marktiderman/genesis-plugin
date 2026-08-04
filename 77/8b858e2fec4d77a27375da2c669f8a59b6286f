@@ -1,0 +1,33 @@
+skills/map/scripts/lib/dashboard.mjs
+  s_038a22b897b50a::t_2bd4ab38ed0d7e 248,253
+skills/map/scripts/lib/flows.mjs
+  s_038a22b897b50a::t_307b44c990cb07 32,48-53,119-125,133-139,149-154
+skills/map/scripts/lib/frontmatter.js
+  s_038a22b897b50a::t_a9b6fec2a31e7d 32-38
+skills/map/scripts/lib/resources.js
+  s_038a22b897b50a::t_a9ab9ad9a76080 289-291,314-315
+skills/map/scripts/lib/score.mjs
+  s_038a22b897b50a::t_b41c2a07b38cbb 41
+skills/map/scripts/map.mjs
+  s_038a22b897b50a::t_3b83fd358813f4 54-55,622,958-963,1018
+skills/map/scripts/serve.mjs
+  s_038a22b897b50a::t_46260ecb1ac9eb 43-48
+skills/map/scripts/test/flows.test.js
+  s_038a22b897b50a::t_e82db7f3d7bdcf 52-55,117-122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "778b858e2fec4d77a27375da2c669f8a59b6286f",
+  "prompts": {},
+  "sessions": {
+    "s_038a22b897b50a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dc8c7472-fb8d-43b2-9409-c0c541ccd15d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Mark Tiderman <marktiderman@users.noreply.github.com>"
+    }
+  }
+}
