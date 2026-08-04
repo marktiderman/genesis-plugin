@@ -86,7 +86,7 @@ worse when a new extractor lands — that is it working.
 That last claim is enforced, not asserted: `check` recomputes the ledger and compares it to the
 committed one, so a hand-edited number is drift and fails the gate exactly like a hand-edited row.
 It used to be written by `sync` and verified by nothing, which made the property a decoration —
-editing the file to read `typed tables on the map 99 / 99` passed CI.
+editing the file to read `typed tables reached from src 99 / 99` passed CI.
 
 Both sides of every fraction are the same unit. `screens routed in src/App.tsx` counts distinct
 innermost non-chrome components, not `<Route` tags: one app's 104 route tags are 42 screens once
@@ -186,3 +186,9 @@ one would be a confident, wrong fact, which is the failure the whole map exists 
 A table whose sources are all absent is left alone entirely: not written, not emptied. If rows for
 it are already committed and the source has since vanished, that fails rather than wiping them —
 a moved router looks identical to a deleted app, and only one of those should cost you the map.
+
+That refusal is scoped to the one table. The other table is still written, because a refusal about
+screens is not a reason to withhold a freshly-read fact about a database — a run that refused
+surfaces once left `rls_enabled: "true"` committed against migrations that had just turned it off,
+with no path to correct it. The ledger *is* withheld, since it is derived from both tables. The
+error names what was written and what was not.
