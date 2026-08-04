@@ -15,6 +15,29 @@ description: >-
 A codebase knows its own structure and cannot state its own purpose. `map` extracts the first and
 refuses to guess the second.
 
+## The job this serves
+
+Before anyone builds, they need an inventory they can trust. Not a grep — an answer. *Does this
+already exist? Which files serve it? What would I break?*
+
+Without one, the only honest move is to invent, and inventing what already exists is how a codebase
+acquires two of everything. This map exists so **reuse and extend cost less than invent** — which
+they never do when the inventory is a guess.
+
+Every question a reader brings is that one at a different zoom: *what does this app do* is the
+flows, *what features does it have* is the features table, *is all of it written down* is the
+unclaimed count, *can I change this table safely* is its reach and the surfaces that read it.
+
+**What it will not answer.** It can show that two features own overlapping code. It cannot say they
+are the same job. Consolidation is a judgement about intent, and intent is the one thing extraction
+never recovers — the same reason features are authored rather than extracted. A reader deciding
+whether to merge two features gets evidence here and makes the call themselves.
+
+**The coverage fractions are inputs, not the outcome.** They measure how much of the inventory is
+written down. They do not measure whether it was used. What this is for is someone extending
+something instead of duplicating it *because the map told them it was there*, and no number in
+`data/` reports that.
+
 ```bash
 MAP="${CLAUDE_PLUGIN_ROOT}/skills/map/scripts/map.mjs"
 node "$MAP" init  --root .   # first run
