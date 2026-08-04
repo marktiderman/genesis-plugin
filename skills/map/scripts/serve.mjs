@@ -40,6 +40,12 @@ const PORT = 4321;
 
 const argv = process.argv.slice(2);
 const rootFlag = argv.indexOf("--root");
+if (rootFlag !== -1 && (!argv[rootFlag + 1] || argv[rootFlag + 1].startsWith("--"))) {
+  // Caught here, not in the try below: this runs before it, and `resolve(undefined)`
+  // throws a TypeError that says nothing about the command line.
+  console.error("\u2717 --root needs a directory");
+  process.exit(2);
+}
 const ROOT = resolve(rootFlag === -1 ? process.cwd() : argv[rootFlag + 1]);
 const noServe = argv.includes("--no-serve");
 

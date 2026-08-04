@@ -51,7 +51,8 @@ Reads:  <root>/src/App.tsx (surfaces), <root>/src/**, <root>/supabase/** (resour
 Writes: <root>/data/{surfaces,resources}/*.md, <root>/data/_views/blind-spots.md   (sync)
         <root>/data/features/_inventory.md — on \`init\` only, and only if absent
         <root>/docs/USER-FLOWS.md                                                  (flows)
-Never writes a feature, surface or flow row. \`check\` verifies the surface rows, the resource
+\`sync\` writes the machine-owned surface and resource rows; it never writes a feature or a
+        flow row — those are yours. \`check\` verifies the surface rows, the resource
         rows, the ledger, and that every flow step names a real surface — not the
         \`_inventory.md\` draft, which is yours and no run reads back.
 `;
@@ -618,7 +619,7 @@ function joinFeatures(surfaces, features) {
  * Every source missing is different, and that one does fail: nothing here is an app this tool can
  * read, and writing an empty map for it would state "no screens, no tables" as a fact.
  */
-const SOURCES = { surfaces: [[APP_FILE]], resources: RESOURCE_SOURCES };
+const SOURCES = { surfaces: [[APP_FILE]], resources: RESOURCE_SOURCES, flows: [["data/flows"]] };
 
 /** For each table, the source groups that are not on disk. Existence only, never content. */
 function missingSources(root) {
@@ -954,6 +955,12 @@ function checkFlows(root) {
 const argv = process.argv.slice(2);
 const command = argv[0];
 const rootFlag = argv.indexOf("--root");
+if (rootFlag !== -1 && (!argv[rootFlag + 1] || argv[rootFlag + 1].startsWith("--"))) {
+  // Caught here, not in the try below: this runs before it, and `resolve(undefined)`
+  // throws a TypeError that says nothing about the command line.
+  console.error("\u2717 --root needs a directory");
+  process.exit(2);
+}
 const root = resolve(rootFlag === -1 ? process.cwd() : argv[rootFlag + 1]);
 
 try {
@@ -1008,7 +1015,7 @@ try {
     throw new Error(
       `no extractable source under ${root} — looked for ` +
         `${Object.values(SOURCES).flat().map((g) => g.join(" | ")).join(", ")}.\n` +
-        `  Nothing here is a codebase map reads; refusing to write an empty map.`,
+        `  Nothing here is a codebase map can read; refusing to write an empty map.`,
     );
   }
   const ledger = blindSpots(root, surfaces, resources);

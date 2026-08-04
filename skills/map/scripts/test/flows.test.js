@@ -49,7 +49,10 @@ function repoWithFeature() {
     "data/features/F-1--x.md",
     `---\nid: F-1\nslug: x\ntitle: Do the thing\nstatus: shipped\nowns: ["src/pages/Alpha.tsx"]\n---\n\n## The job\n\nx\n`,
   );
-  run(root, "sync");
+  // Assert the setup worked. A sync that fails here used to surface as a puzzling assertion
+  // failure in whichever test used the fixture, rather than as the sync error it actually was.
+  const synced = run(root, "sync");
+  assert.equal(synced.code, 0, `fixture sync failed: ${synced.stderr || synced.stdout}`);
   return root;
 }
 
@@ -111,8 +114,12 @@ describe("loadMapTables", () => {
   test("fails on an actor or entry outside the allowed lists", () => {
     const root = repoWithFeature();
     put(root, "data/flows/FL-001--do-it.md", FLOW({ actor: "wizard" }));
-    const { errors } = loadMapTables(root);
-    assert.match(errors.join("\n"), /actor "wizard" is not one of/);
+    assert.match(loadMapTables(root).errors.join("\n"), /actor "wizard" is not one of/);
+
+    // Both halves of the name, or the second enum could stop being checked and nothing would say so.
+    const root2 = repoWithFeature();
+    put(root2, "data/flows/FL-001--do-it.md", FLOW({ entry: "telepathy" }));
+    assert.match(loadMapTables(root2).errors.join("\n"), /entry "telepathy" is not one of/);
   });
 
   test("fails on a duplicate flow id", () => {

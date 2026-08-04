@@ -245,12 +245,12 @@ function renderResourcesSection(score) {
 
   const rows = score.resources
     .map((r) => {
-      const nothingReaches = !r.reached_from_src && r.used_by.length === 0;
+      const nothingReaches = r.reach === "none" && r.used_by.length === 0;
       const rlsState =
         r.rls_enabled === "true" ? "enabled" : r.rls_enabled === "false" ? "disabled" : "unknown";
       const rlsCls = rlsState === "enabled" ? "ok-mark" : rlsState === "disabled" ? "gap-mark" : "muted";
       const reach = [
-        r.reached_from_src ? chip("src", "chip-mini chip-ok") : null,
+        chip(r.reach, r.reach === "feature" ? "chip-mini chip-ok" : "chip-mini"),
         r.used_by.length ? chip(`edge ×${r.used_by.length}`, "chip-mini chip-ok") : null,
       ]
         .filter(Boolean)

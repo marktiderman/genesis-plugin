@@ -38,7 +38,7 @@ function loadResources(root) {
       debt: fm.debt,
       rls_enabled: fm.rls_enabled,
       rls: fm.rls ?? [],
-      reached_from_src: fm.reached_from_src === "true",
+      reach: fm.reach || "none",
       used_by: fm.used_by ?? [],
       fields: fm.fields ?? [],
       claimed_by: fm.claimed_by ?? [],

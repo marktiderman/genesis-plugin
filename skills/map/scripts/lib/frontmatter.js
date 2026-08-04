@@ -29,6 +29,13 @@ function readQuoted(s, file) {
       out += s[++i];
       continue;
     }
+    // YAML escapes a literal quote inside a single-quoted scalar by doubling it: 'it''s'.
+    // Returning at the first one truncates the value and leaves the rest to be read as a comment.
+    if (quote === "'" && c === "'" && s[i + 1] === "'") {
+      out += "'";
+      i++;
+      continue;
+    }
     if (c === quote) return [out, i + 1];
     out += c;
   }

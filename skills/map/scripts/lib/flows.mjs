@@ -29,6 +29,7 @@
  */
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { readFrontmatter } from "./frontmatter.js";
 
 export const ALLOWED_ACTORS = ["solo", "member", "coached-client", "coach", "admin"];
 export const ALLOWED_ENTRY = ["nav", "inline", "external", "system"];
@@ -44,37 +45,12 @@ export const outFile = (root) => join(root, "docs/USER-FLOWS.md");
 // Exported: this is the one frontmatter reader `scripts/lib/score.mjs` reuses for data/resources/,
 // which this module itself never reads — one reader for the whole map, not two that can disagree.
 
-export function unquote(s) {
-  const t = s.trim();
-  if (t.length >= 2 && ((t[0] === '"' && t.at(-1) === '"') || (t[0] === "'" && t.at(-1) === "'"))) {
-    return t.slice(1, -1);
-  }
-  return t;
-}
-
-export function parseFrontmatter(text, file) {
-  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
-  if (!m) throw new Error(`${file}: no frontmatter block`);
-  const out = {};
-  for (const raw of m[1].split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#")) continue;
-    const kv = /^([A-Za-z_][\w-]*):\s*(.*)$/.exec(raw);
-    if (!kv) continue;
-    const [, key, rest] = kv;
-    const value = rest.trim();
-    if (value.startsWith("[")) {
-      const close = value.indexOf("]");
-      if (close === -1) throw new Error(`${file}: unclosed list for "${key}"`);
-      const inner = value.slice(1, close).trim();
-      out[key] = inner === "" ? [] : inner.split(",").map((s) => unquote(s));
-    } else {
-      const hashIdx = value.indexOf(" #");
-      out[key] = unquote(hashIdx === -1 ? value : value.slice(0, hashIdx));
-    }
-  }
-  return out;
-}
+/**
+ * The map has ONE frontmatter reader. This module used to carry a second, looser copy — two
+ * readers of one format drift, and the looser one accepts rows the gate would reject.
+ * Re-exported under the old name so `score.mjs` keeps working.
+ */
+export const parseFrontmatter = (text, file) => readFrontmatter(text, { file });
 
 export function bodyOf(text) {
   const m = /^---\r?\n[\s\S]*?\r?\n---\r?\n?([\s\S]*)$/.exec(text);
@@ -140,6 +116,13 @@ export function loadMapTables(root = process.cwd()) {
   const features = new Map(); // id -> { id, slug, title, status }
   for (const f of listFiles(featuresDir)) {
     const fm = parseFrontmatter(readFileSync(join(featuresDir, f), "utf8"), `features/${f}`);
+    // Before claimId, before the Map, before anything sorts on it: an absent id becomes a Map key
+    // of `undefined` and then a TypeError inside localeCompare, far from the row that caused it.
+    // Collected as an error and skipped, so the loader keeps reporting every problem in one pass.
+    if (!fm.id) {
+      fail(`features/${f}: no id`);
+      continue;
+    }
     claimId("features", fm.id, `features/${f}`);
     features.set(fm.id, { id: fm.id, slug: fm.slug, title: fm.title, status: fm.status });
   }
@@ -147,6 +130,13 @@ export function loadMapTables(root = process.cwd()) {
   const surfaces = new Map(); // id -> { id, title, claimed_by: [] }
   for (const f of listFiles(surfacesDir)) {
     const fm = parseFrontmatter(readFileSync(join(surfacesDir, f), "utf8"), `surfaces/${f}`);
+    // Before claimId, before the Map, before anything sorts on it: an absent id becomes a Map key
+    // of `undefined` and then a TypeError inside localeCompare, far from the row that caused it.
+    // Collected as an error and skipped, so the loader keeps reporting every problem in one pass.
+    if (!fm.id) {
+      fail(`surfaces/${f}: no id`);
+      continue;
+    }
     claimId("surfaces", fm.id, `surfaces/${f}`);
     surfaces.set(fm.id, { id: fm.id, title: fm.title, claimed_by: fm.claimed_by ?? [] });
   }
@@ -156,6 +146,12 @@ export function loadMapTables(root = process.cwd()) {
     const file = `flows/${f}`;
     const text = readFileSync(join(flowsDir, f), "utf8");
     const fm = parseFrontmatter(text, file);
+    // Same guard as the other two tables: nothing downstream — claimId, the flow list, the doc
+    // renderer — has a sensible answer for a row with no id.
+    if (!fm.id) {
+      fail(`${file}: no id`);
+      continue;
+    }
     const body = bodyOf(text);
 
     const filenameMatch = /^([A-Za-z0-9-]+)--([a-z0-9-]+)\.md$/.exec(f);
