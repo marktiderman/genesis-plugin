@@ -126,6 +126,96 @@ function renderScoreSection(score) {
     </section>`;
 }
 
+/**
+ * The open questions, named — not a summary of the numbers above but the rows behind them.
+ *
+ * A fraction tells you 9 of 27 features have a flow. It does not tell you *which* eighteen, and
+ * without that the number is something to feel bad about rather than something to act on. Every
+ * group here is a list you can work through, ordered so the sharpest sits first: a shipped feature
+ * with no flow is a thing the product does that nobody has written down, which is a different and
+ * more urgent gap than an unbuilt one.
+ *
+ * Framed as questions on purpose. None of this fails a build. A screen no job claims is unclaimed
+ * work, and a table nothing reaches may be a table that is waiting for its feature.
+ */
+function renderGapsSection(score) {
+  if (score.errors.length > 0 || !score.coverage) return "";
+
+  const { unclaimedSurfaces, featuresWithFlows } = score.coverage;
+  const noFlow = score.features.filter((f) => !featuresWithFlows.has(f.id));
+  const shippedNoFlow = noFlow.filter((f) => f.status === "shipped");
+  const unshippedNoFlow = noFlow.filter((f) => f.status !== "shipped");
+  const unreached = score.resources.filter((r) => r.reach === "none" && r.used_by.length === 0);
+  const listedOnly = score.resources.filter((r) => r.reach === "listed");
+
+  const group = (id, n, question, why, items, render) =>
+    n === 0
+      ? ""
+      : `<details class="gap" id="gap-${id}"${id === "shipped-no-flow" ? " open" : ""}>
+          <summary><span class="gap-n">${n}</span> ${escapeHtml(question)}</summary>
+          <p class="gap-why">${why}</p>
+          <div class="gap-items">${items.map(render).join("")}</div>
+        </details>`;
+
+  const chipFor = (text, cls = "") => `<span class="chip ${cls}">${escapeHtml(text)}</span>`;
+
+  const groups = [
+    group(
+      "shipped-no-flow",
+      shippedNoFlow.length,
+      "shipped features nobody has walked",
+      "The product does these today and no flow records how a person gets there. The sharpest gap on this page — the knowledge exists only in whoever built it.",
+      shippedNoFlow,
+      (f) => `${chipFor(`${f.id} ${f.title}`)}`,
+    ),
+    group(
+      "unclaimed",
+      unclaimedSurfaces.length,
+      "screens no job claims",
+      "Either a job exists and nobody wrote it down, or the screen is chrome that no job should own. Both are answers; neither is automatic.",
+      unclaimedSurfaces,
+      (s) => chipFor(s.id, "chip-gap"),
+    ),
+    group(
+      "unbuilt-no-flow",
+      unshippedNoFlow.length,
+      "unshipped features with no flow",
+      "Expected — a flow describes a walk through screens that exist. These become interesting the moment their status changes.",
+      unshippedNoFlow,
+      (f) => chipFor(`${f.id} ${f.title}`, "chip-mini"),
+    ),
+    group(
+      "unreached",
+      unreached.length,
+      "tables nothing reaches at all",
+      "No feature calls them, no edge function names them, no literal mentions them. The closest thing here to a delete list — verify before acting on it.",
+      unreached,
+      (r) => chipFor(r.name, "chip-gap"),
+    ),
+    group(
+      "listed-only",
+      listedOnly.length,
+      "tables named but never called",
+      "The name appears in src/ and nothing recognised calls it. Usually work that stopped: schema built, then abandoned before anything used it. Not deletable without looking.",
+      listedOnly,
+      (r) => chipFor(r.name, "chip-mini"),
+    ),
+  ].join("");
+
+  if (!groups) {
+    return `<section id="gaps"><h2>Open questions</h2>
+      <div class="banner banner-ok"><p>Nothing outstanding — every screen is claimed, every
+      feature walked, every table reached.</p></div></section>`;
+  }
+
+  return `<section id="gaps">
+      <h2>Open questions</h2>
+      <p class="section-lede">The rows behind the fractions. None of these fail a build — a gap is
+        unclaimed work, and the point of naming it is that you can work through it.</p>
+      ${groups}
+    </section>`;
+}
+
 function renderFlowsSection(score) {
   if (score.errors.length > 0) return "";
   const featureById = new Map(score.features.map((f) => [f.id, f]));
@@ -490,7 +580,35 @@ export function renderDashboardHtml(score, repoName = null) {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(heading)}</title>
-<style>${STYLE}</style>
+<style>${STYLE}
+/* Open questions — a list you work through, not a score to feel bad about. */
+  .gap {
+    background: hsl(var(--card)); border: 1px solid hsl(var(--border));
+    border-radius: var(--radius); margin-bottom: 0.5rem;
+  }
+  .gap summary {
+    cursor: pointer; padding: 0.7rem 1rem; font-weight: 600; list-style: none;
+    display: flex; align-items: center; gap: 0.6rem;
+  }
+  .gap summary::-webkit-details-marker { display: none; }
+  .gap summary::before {
+    content: "▸"; color: hsl(var(--muted-foreground)); font-size: 0.7rem; transition: transform 0.12s;
+  }
+  .gap[open] summary::before { transform: rotate(90deg); }
+  .gap summary:hover { background: hsl(var(--muted)); border-radius: var(--radius); }
+  .gap-n {
+    font-variant-numeric: tabular-nums; font-weight: 700; min-width: 2ch; text-align: right;
+    color: hsl(var(--primary));
+  }
+  .gap-why {
+    margin: 0 1rem 0.6rem 2rem; color: hsl(var(--muted-foreground)); font-size: 0.85rem; max-width: 70ch;
+  }
+  .gap-items { display: flex; flex-wrap: wrap; gap: 0.35rem; padding: 0 1rem 0.9rem 2rem; }
+  .chip-gap { background: hsl(var(--accent) / 0.25); color: hsl(var(--accent-foreground)); }
+  @media (prefers-color-scheme: dark) {
+    .chip-gap { background: hsl(var(--accent) / 0.22); color: hsl(var(--accent)); }
+  }
+</style>
 </head>
 <body>
 <div class="wrap">
@@ -504,6 +622,7 @@ export function renderDashboardHtml(score, repoName = null) {
   </header>
 
   ${renderScoreSection(score)}
+  ${renderGapsSection(score)}
   ${renderFlowsSection(score)}
   ${renderFeaturesSection(score)}
   ${renderSurfacesSection(score)}
