@@ -26,7 +26,7 @@ version — pull the latest at any time with `/plugin update genesis@genesis`.
 | `/genesis:one-three-one` | ONE problem → THREE distinct options → pros and cons → ONE call. Forces past the first instinct on any non-trivial decision. |
 | `/genesis:align` | Reflect intent back with a concrete sketch and drive to a fast yes/no before building. |
 | `/genesis:debrief` | Close a work cycle in four lines with one concrete 1% improvement. |
-| `/genesis:cartography` | Extract every screen a codebase has into rows, joined to hand-written features, and fail a build when the map stops being true. |
+| `/genesis:map` | Extract every screen a codebase has into rows, joined to hand-written features, verify authored flows against them, and fail a build when the map stops being true. |
 
 Skills are model-invoked — Claude reaches for them when the situation fits. You can also call
 them directly by name.

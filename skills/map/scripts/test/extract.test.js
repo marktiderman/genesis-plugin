@@ -1,5 +1,5 @@
 /**
- * Extractor tests, against fixture repos built in a temp dir.
+ * Scan tests, against fixture repos built in a temp dir.
  *
  * Every case here is a defect that shipped. An adversarial review reproduced each one against
  * real committed output — a lost `role: admin`, a missing verb, a screen deleted by a name
@@ -16,7 +16,7 @@ import { after, describe, test } from "node:test";
 
 import { readFrontmatter, yamlList, yamlScalar } from "../lib/frontmatter.js";
 
-const CLI = resolve(dirname(fileURLToPath(import.meta.url)), "..", "cartography.mjs");
+const CLI = resolve(dirname(fileURLToPath(import.meta.url)), "..", "map.mjs");
 const roots = [];
 
 after(() => roots.forEach((r) => rmSync(r, { recursive: true, force: true })));
@@ -911,7 +911,7 @@ describe("the owns join", () => {
     assert.deepEqual(rows(root).alpha.claimed_by, ["F-1"], "the claim was silently dropped");
   });
 
-  test("does not report a feature owning code this extractor cannot see", () => {
+  test("does not report a feature owning code this scan cannot see", () => {
     // `owns: [supabase/functions/**]` is a real claim about real code. Reporting it as dead is a
     // permanent false positive no action can clear. The claim is real because the file is there —
     // the fixture used to assert the withholding rule against a directory it never created, which
@@ -932,7 +932,7 @@ describe("the owns join", () => {
     // `!` said "owns nothing" about `src/pages/ClientDashboard.tsx` — 11 KB of live code reached
     // through a dispatcher rather than a `<Route>`. The glob was matched against surface ROWS, so
     // a real file in the extracted directory read as deleted code, the gate went red, and the
-    // remedy it printed (`run cartography sync`) could never clear it: sync does not write
+    // remedy it printed (`run map sync`) could never clear it: sync does not write
     // data/features/, and the file it named was on disk the whole time.
     const root = withFeature('owns: ["src/pages/Dispatched.tsx"]');
     writeFileSync(join(root, "src/pages/Dispatched.tsx"), "export default function Dispatched(){return null}\n");
@@ -968,7 +968,7 @@ describe("the owns join", () => {
   });
 });
 
-describe("independent extractors", () => {
+describe("independent halves", () => {
   test("extracts the data layer from a repo with no React Router", () => {
     // `extractRoutes` threw on a missing src/App.tsx, and that aborted the run before resources
     // were touched at all. A monorepo with 13 migrations and a dozen edge functions produced no
@@ -1045,7 +1045,7 @@ describe("the blind-spots ledger", () => {
 
   test("compares screens with screens, not screens with route tags", () => {
     // The fraction was unique screen components over `<Route` tokens: two units, and a denominator
-    // no extractor could ever reach. A scope resolver and a `<Navigate>` are route tags and neither
+    // no scan could ever reach. A scope resolver and a `<Navigate>` are route tags and neither
     // is another screen, so 42 / 104 read as permanent blindness where there was none — and hid
     // the finding that matters, a routed component that produced no row.
     const root = repo(
@@ -1094,7 +1094,7 @@ describe("the blind-spots ledger", () => {
       { Alpha: "", AuditLog: "" },
     );
     run(root);
-    assert.deepEqual(Object.keys(rows(root)), ["alpha"], "the extractor still cannot read that form");
+    assert.deepEqual(Object.keys(rows(root)), ["alpha"], "the scan still cannot read that form");
     assert.match(ledgerOf(root), /screens routed in src\/App\.tsx\s+1 \/ 2\s+a gap is a routed component/);
   });
 

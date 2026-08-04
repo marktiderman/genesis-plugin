@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * cartography — map a codebase into gitdata rows.
+ * map — map a codebase into gitdata rows.
  *
  * Extracts the facts a codebase already knows about itself (routes, screens, the dialogs each
  * screen opens, which design system it leans on) and writes them as machine-owned rows. Human
- * intent — what job a screen serves — lives in a separate table the extractor never opens.
+ * intent — what job a screen serves — lives in a separate table this tool never opens.
  *
  *   data/surfaces/    machine-owned · rewritten every run · never hand-edited
  *   data/features/    human-owned   · rows never written  · joins via `owns:` globs
@@ -20,7 +20,7 @@
  * Node built-ins only, no dependencies.
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { basename, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 
 import { readFrontmatter, yamlList, yamlScalar } from "./lib/frontmatter.js";
 import {
@@ -35,21 +35,25 @@ import {
   unparsedLegacyTableFile,
 } from "./lib/resources.js";
 import { surfaceResourceEdges } from "./lib/resource-edges.js";
+import { loadMapTables, outFile, renderUserFlowsDoc } from "./lib/flows.mjs";
 
-const HELP = `cartography — map a codebase into gitdata rows
+const HELP = `map — map a codebase into gitdata rows
 
-  cartography init  [--root <dir>]   first run: extract surfaces, propose a feature inventory
-  cartography sync  [--root <dir>]   re-extract surfaces, report what changed
-  cartography check [--root <dir>]   report without writing; exit 1 on findings (CI, pre-push)
+  map init  [--root <dir>]   first run: extract surfaces, propose a feature inventory
+  map sync  [--root <dir>]   re-extract surfaces and resources, report what changed
+  map check [--root <dir>]   report without writing; exit 1 on findings (CI, pre-push)
+  map flows [--root <dir>]   regenerate the generated flows doc from data/flows/
 
 Reads:  <root>/src/App.tsx (surfaces), <root>/src/**, <root>/supabase/** (resources),
-        <root>/src/lib/nav-registry.ts (optional)
+        <root>/src/lib/nav-registry.ts (optional), <root>/data/{features,surfaces,flows}/ (flows)
         Every source is optional and an absent one is reported, not fatal — the surface and
-        resource extractors are independent. Only an entirely unreadable repo fails.
-Writes: <root>/data/{surfaces,resources}/*.md, <root>/data/_views/blind-spots.md
+        resource extraction are independent of each other. Only an entirely unreadable repo fails.
+Writes: <root>/data/{surfaces,resources}/*.md, <root>/data/_views/blind-spots.md   (sync)
         <root>/data/features/_inventory.md — on \`init\` only, and only if absent
-Never writes a feature row. \`check\` verifies the surface rows, the resource rows and the
-        ledger — not the \`_inventory.md\` draft, which is yours and no run reads back.
+        <root>/docs/USER-FLOWS.md                                                  (flows)
+Never writes a feature, surface or flow row. \`check\` verifies the surface rows, the resource
+        rows, the ledger, and that every flow step names a real surface — not the
+        \`_inventory.md\` draft, which is yours and no run reads back.
 `;
 
 // ── tiny helpers ────────────────────────────────────────────────────────────────
@@ -156,7 +160,7 @@ const matchesAny = (path, globs) =>
   globs.flatMap(expandBraces).some((g) => globToRe(g).test(path));
 
 // ── extraction ──────────────────────────────────────────────────────────────────
-/** The only file the surface extractor reads routes from. Its absence is the surface blind spot. */
+/** The only file the surface scan reads routes from. Its absence is the surface blind spot. */
 const APP_FILE = "src/App.tsx";
 
 /**
@@ -204,7 +208,7 @@ function routeTokens(src) {
     if (end === -1) {
       throw new Error(
         `unterminated <Route> tag near "${src.slice(at, at + 60).trim()}" — ` +
-          `the extractor cannot read this router`,
+          `map cannot read this router`,
       );
     }
     out.push({ close: false, text: src.slice(at, end), selfClosing: src[end - 1] === "/" });
@@ -232,9 +236,9 @@ function braced(text, open) {
  * opened — since taking an outer one collapses every guarded page into a single row named after
  * the guard. It is the only form extraction turns into a row.
  *
- * `component` is the React Router 6.4+ data-router form, `Component={Home}`, which the extractor
+ * `component` is the React Router 6.4+ data-router form, `Component={Home}`, which this scan
  * cannot follow. Naming it here is the point: the blind-spots denominator has to be able to count
- * a screen the extractor cannot see. Both sides of that fraction were computed by this one
+ * a screen the scan cannot see. Both sides of that fraction were computed by this one
  * predicate, so it read 100% forever — two real screens could be added in a form the parser does
  * not read and `42 / 42` did not move, while the row's own note promised "a gap is a routed
  * component that produced no row". The two sides now share one parser and differ by exactly what
@@ -265,7 +269,7 @@ function routerSource(root) {
 }
 
 /**
- * Every distinct non-chrome component the router mounts, in any form, whether or not the extractor
+ * Every distinct non-chrome component the router mounts, in any form, whether or not the scan
  * can turn it into a row. The blind-spots denominator: counted in the router, not in the map.
  */
 function routedScreens(root) {
@@ -282,7 +286,7 @@ function routedScreens(root) {
  * screen: a fact stated confidently and wrong, which is worse in a generated table than a gap.
  *
  * A repo with no router extracts no routes and says so. It does NOT abort: it used to throw here,
- * which killed the resource extractor too — one monorepo with 13 migrations and a dozen edge
+ * which killed resource extraction too — one monorepo with 13 migrations and a dozen edge
  * functions produced no map at all because it routes from files instead of from JSX.
  */
 function extractRoutes(root) {
@@ -537,7 +541,7 @@ writes: ${yamlList(s.writes)}
 claimed_by: ${yamlList(s.claimedBy)}
 ---
 
-<!-- GENERATED by \`cartography sync\`. Hand edits are overwritten and \`cartography check\` fails.
+<!-- GENERATED by \`map sync\`. Hand edits are overwritten and \`map check\` fails.
      Intent belongs in data/features/, which this tool never touches. -->
 `;
 
@@ -564,7 +568,7 @@ fields: ${yamlList(r.fields)}
 claimed_by: ${yamlList(r.claimed_by)}
 ---
 
-<!-- GENERATED by \`cartography sync\`. Hand edits are overwritten and \`cartography check\` fails.
+<!-- GENERATED by \`map sync\`. Hand edits are overwritten and \`map check\` fails.
      Intent belongs in data/features/, which this tool never touches. -->
 `;
 
@@ -603,12 +607,12 @@ function joinFeatures(surfaces, features) {
 }
 
 /**
- * Where each extractor reads from, as groups of alternatives: a group is readable if any path in
+ * Where each half of map reads from, as groups of alternatives: a group is readable if any path in
  * it exists.
  *
- * The two extractors are independent. A repo with no React Router still has a data layer; a repo
+ * The two halves are independent. A repo with no React Router still has a data layer; a repo
  * with no migrations still has screens. So a missing source is a **stated absence** — printed,
- * survivable, and never a reason to take the other extractor down. `extractRoutes` used to throw
+ * survivable, and never a reason to take the other half down. `extractRoutes` used to throw
  * on a missing `src/App.tsx`, which aborted the run before resources were touched at all.
  *
  * Every source missing is different, and that one does fail: nothing here is an app this tool can
@@ -664,7 +668,7 @@ function report(root, surfaces, features) {
   // rather than a `<Route>`) was reported as owning nothing, failed the gate, and no `sync` could
   // clear it: `sync` never writes data/features/, and the file it named was right there on disk.
   //
-  // A feature owning only code cartography does not extract — an edge function, a shared hook —
+  // A feature owning only code map does not extract — an edge function, a shared hook —
   // is still not dead, and now for the honest reason: those files exist, so the globs match. The
   // old prefix heuristic reached the same verdict by guessing from where surface rows happened to
   // live, which made the false positive it was written to prevent fire inside `src/pages` itself.
@@ -756,7 +760,7 @@ function printReport(diffs, { unclaimed, dead }, surfaces, resources, missing, u
   const line = (mark, label, items) =>
     items.length && console.log(`  ${mark} ${label.padEnd(22)} ${items.join(", ")}`);
   console.log(`  ${surfaces.length} surface(s), ${resources.length} resource(s) extracted`);
-  // What each extractor could not read. A gap prints; it never fails. Silence here used to mean
+  // What each half could not read. A gap prints; it never fails. Silence here used to mean
   // "this repo has no data layer" and "this repo has no screens" indistinguishably from "the file
   // those facts live in is not where this tool looks".
   for (const [table, absent] of Object.entries(missing)) line("·", `unread (${table})`, absent);
@@ -775,23 +779,23 @@ function printReport(diffs, { unclaimed, dead }, surfaces, resources, missing, u
   line("?", "claimed by no feature", unclaimed.map((s) => s.id));
   // `!` fails, but it is not drift: drift is a generated table gone stale and `sync` rewrites it,
   // while a glob pointing at no file lives in a row this tool never writes. Counting the two
-  // together printed "run `cartography sync` and commit" as the remedy for a finding `sync`
+  // together printed "run `map sync` and commit" as the remedy for a finding `sync`
   // structurally cannot touch.
   return { drift, dead: dead.length, coverage: unclaimed.length };
 }
 
 /**
- * The blind-spots ledger: how much of what exists the extractor can see.
+ * The blind-spots ledger: how much of what exists map can see.
  *
  * Every denominator here is counted **outside** the map — routes in the router, tables in the
  * generated types, functions on disk. That is deliberate and it is the whole design: no amount of
- * editing `data/` moves a single number, so the only way to improve this file is to teach the
- * extractor to see more. A score the tool computes about itself from its own output would report
+ * editing `data/` moves a single number, so the only way to improve this file is to teach map to
+ * see more. A score the tool computes about itself from its own output would report
  * a perfect trace while blind to an entire layer, which is exactly the state this app was in.
  */
 function blindSpots(root, surfaces, resources) {
   // Both sides of this fraction are screens. It used to be unique screen components over `<Route`
-  // tokens — two units in one fraction, with a denominator no extractor could ever reach: 104
+  // tokens — two units in one fraction, with a denominator map could never reach: 104
   // route tags resolve to 42 screens because `<Navigate>`s, legacy redirects and the same page
   // mounted in five scopes are all route tags and none of them is another screen. A ratio whose
   // ceiling is unreachable reports permanent blindness where there is none, and hides the real
@@ -870,21 +874,21 @@ function blindSpots(root, surfaces, resources) {
     ],
   ];
   const width = Math.max(...rows.map(([label]) => label.length));
-  return `# Blind spots — what the extractor cannot see
+  return `# Blind spots — what map cannot see
 
 **Not a score, and not a target.** Every denominator below is counted outside the map: screens in
 the router, tables in the generated types, functions on disk. Both sides of each fraction are the
 same unit, so the ceiling is reachable. Nothing you write in \`data/\` can move a single number
-here — \`cartography check\` recomputes this file and fails on any difference, so editing it is
-drift, not improvement. The only way to move a number is to teach the extractor to see more.
+here — \`map check\` recomputes this file and fails on any difference, so editing it is
+drift, not improvement. The only way to move a number is to teach map to see more.
 
-Expect these to get *worse* when a new extractor lands. That is the extractor working.
+Expect these to get *worse* when map gets better at reading the code. That is map working.
 
 \`\`\`text
 ${rows.map(([label, n, d, note]) => `${label.padEnd(width)}  ${String(n).padStart(4)} / ${note ? `${String(d).padEnd(4)}  ${note}` : String(d)}`).join("\n")}
 \`\`\`
 
-<!-- GENERATED by \`cartography sync\`. Hand edits are overwritten. -->
+<!-- GENERATED by \`map sync\`. Hand edits are overwritten. -->
 `;
 }
 
@@ -917,6 +921,30 @@ function proposeInventory(root, surfaces) {
   return path;
 }
 
+/**
+ * Verifies `data/flows/` against `data/features/` and `data/surfaces/` — the ON-DISK committed
+ * rows, not the freshly extracted ones in this run's `surfaces`/`resources` arrays. This table is
+ * authored, not generated, and its checker reads exactly what `map flows`'s own render reads.
+ *
+ * Absent `data/flows/` means this repo does not author flows through this table — reported, not
+ * fatal, the same rule every other optional source in this tool follows (see `missingSources`
+ * above). Reporting instead of skipping in silence is what lets a repo that adopts the table later
+ * discover the gate for free instead of wondering why nothing checks it.
+ */
+function checkFlows(root) {
+  if (!existsSync(join(root, "data/flows"))) {
+    return { present: false, errors: [], docStale: false };
+  }
+  const tables = loadMapTables(root);
+  if (tables.errors.length > 0) {
+    return { present: true, errors: tables.errors, docStale: false };
+  }
+  const rendered = renderUserFlowsDoc(tables);
+  const path = outFile(root);
+  const committed = existsSync(path) ? readFileSync(path, "utf8") : null;
+  return { present: true, errors: [], docStale: committed !== rendered };
+}
+
 // ── entry ───────────────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
 const command = argv[0];
@@ -924,16 +952,30 @@ const rootFlag = argv.indexOf("--root");
 const root = resolve(rootFlag === -1 ? process.cwd() : argv[rootFlag + 1]);
 
 try {
+  if (command === "flows") {
+    const tables = loadMapTables(root);
+    if (tables.errors.length > 0) {
+      console.error(`map flows: ${tables.errors.length} problem(s):\n`);
+      for (const e of tables.errors) console.error(`  - ${e}`);
+      process.exit(1);
+    }
+    const rendered = renderUserFlowsDoc(tables);
+    mkdirSync(dirname(outFile(root)), { recursive: true });
+    writeFileSync(outFile(root), rendered);
+    console.log(`map flows: wrote ${relative(root, outFile(root))}`);
+    process.exit(0);
+  }
+
   if (!["init", "sync", "check"].includes(command)) {
     console.log(HELP);
     process.exit(command ? 1 : 0);
   }
   const missing = missingSources(root);
   const features = readFeatures(root);
-  // Resources first: the surface extractor's reads/writes join against resource ids, which only
+  // Resources first: the surface scan's reads/writes join against resource ids, which only
   // exist once `extractResources` has reconciled a name to one. Computing resources first does
-  // not compromise "the two extractors are independent" below — a repo with no data layer simply
-  // hands the surface extractor an empty index, so every surface's reads/writes come back empty
+  // not compromise "the two halves are independent" below — a repo with no data layer simply
+  // hands the surface scan an empty index, so every surface's reads/writes come back empty
   // (a real fact: there is nothing to reference), not a crash and not a skipped table.
   const resources = assertUniqueIds(extractResources(root), "resource");
   const resourceIndex = {
@@ -941,7 +983,7 @@ try {
     addressed: declaredResources(root, legacyTables(root)).map((d) => d.name),
     nameToId: new Map(resources.map((r) => [r.name, r.id])),
   };
-  // The two extractors are independent: neither absence takes the other down.
+  // The two halves are independent: neither absence takes the other down.
   const surfaces = joinFeatures(assertUniqueIds(extractSurfaces(root, resourceIndex)), features);
   // Nothing read at all is not a stack this tool maps. Writing "no screens, no tables" for it
   // would be a confident, wrong fact — the failure mode the whole map avoids.
@@ -961,7 +1003,7 @@ try {
     throw new Error(
       `no extractable source under ${root} — looked for ` +
         `${Object.values(SOURCES).flat().map((g) => g.join(" | ")).join(", ")}.\n` +
-        `  Nothing here is a codebase this extractor reads; refusing to write an empty map.`,
+        `  Nothing here is a codebase map reads; refusing to write an empty map.`,
     );
   }
   const ledger = blindSpots(root, surfaces, resources);
@@ -976,20 +1018,33 @@ try {
 
   if (command === "check") {
     const { drift, dead, coverage } = printReport(diffs, r, surfaces, resources, missing, unparsedLegacy);
-    if (drift > 0) console.log(`\n  ${drift} stale fact(s) — run \`cartography sync\` and commit.`);
+    // Flows are authored, not extracted, so the surface/resource scan above never reads
+    // data/flows/ — its one guarantee is that every step names a surface that exists, and a
+    // guarantee nothing runs is a claim, not a check. This is what makes it true, folded into the
+    // one command rather than left as a second gate doing the other half of one job.
+    const flowsCheck = checkFlows(root);
+    if (flowsCheck.present && flowsCheck.errors.length > 0) {
+      console.log(`\n  flows: ${flowsCheck.errors.length} problem(s):`);
+      for (const e of flowsCheck.errors) console.log(`    - ${e}`);
+    }
+    if (flowsCheck.present && flowsCheck.docStale) {
+      console.log(`\n  ~ ${relative(root, outFile(root))} is stale — run \`map flows\` and commit.`);
+    }
+    const flowsFailed = flowsCheck.errors.length > 0 || flowsCheck.docStale;
+    if (drift > 0) console.log(`\n  ${drift} stale fact(s) — run \`map sync\` and commit.`);
     // `sync` never writes data/features/, so it cannot clear this one — printing it as the remedy
     // sent a reader to a command that provably does nothing. The glob is the thing to fix.
     if (dead > 0) console.log(`  ${dead} feature(s) own no file that exists — fix the \`owns:\` glob, or delete the row.`);
-    else if (drift === 0 && coverage > 0) console.log(`\n  Map is current. ${coverage} screen(s) await a job.`);
-    process.exit(drift + dead > 0 ? 1 : 0);
+    else if (drift === 0 && !flowsFailed && coverage > 0) console.log(`\n  Map is current. ${coverage} screen(s) await a job.`);
+    process.exit(drift + dead > 0 || flowsFailed ? 1 : 0);
   }
 
-  // Refuse to empty a populated table. A router refactor, a moved registry, or a source this
-  // extractor can no longer find looks exactly like "there is nothing here", and wiping the map on
+  // Refuse to empty a populated table. A router refactor, a moved registry, or a source map can
+  // no longer find looks exactly like "there is nothing here", and wiping the map on
   // that reading loses more than it reports. Per table, so a repo that has one and not the other
   // keeps the one it has.
   //
-  // The two tables' writes are independent too — the same promise the two *extractors* make
+  // The two tables' writes are independent too — the same promise the two *halves* make
   // (HELP above, SKILL.md's "the other half runs anyway"). A refusal on one table used to `throw`
   // from inside this loop, which unwound past the other table's `writeTable` call and past the
   // ledger write below it: a refusal on surfaces alone left `data/resources/` holding a fact
@@ -1009,7 +1064,7 @@ try {
         table,
         message:
           `extracted 0 ${table} but ${existing} row(s) are committed — refusing to empty the table.\n` +
-          `      ${missing[table].length ? `Source(s) not found: ${missing[table].join(", ")}.` : "The extractor no longer understands its sources."}\n` +
+          `      ${missing[table].length ? `Source(s) not found: ${missing[table].join(", ")}.` : "Map no longer understands its sources."}\n` +
           `      Fix it, or delete data/${table}/ deliberately.`,
       });
       continue;

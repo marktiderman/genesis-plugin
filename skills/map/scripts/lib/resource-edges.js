@@ -28,7 +28,7 @@
  *
  * A table this scan cannot resolve to a literal name — passed through a variable, imported by a
  * convention this repo does not use — is not guessed at. It is simply absent, the same
- * "invisible rather than invented" rule the rest of cartography holds to. A name it DOES resolve
+ * "invisible rather than invented" rule the rest of map holds to. A name it DOES resolve
  * but that `extractResources` never saw from any of its own sources is dropped rather than
  * minted into a resource id: that should not happen (every form here is a form `tableRefs` in
  * `resources.js` already reads across the whole tree), but a defensive skip costs nothing and an
@@ -76,7 +76,7 @@ const HOOK_IMPORT_RE = /import\s+(?:\w+\s*,\s*)?\{([^}]*)\}\s*from\s*["']@\/hook
 /**
  * Skip a quoted or template-literal body starting at `text[i]`, honoring backslash escapes.
  * Every brace/semicolon counter below needs this: counting a `{` or `;` that is really inside a
- * string desyncs the scan the same way it did for the route parser in `cartography.mjs`.
+ * string desyncs the scan the same way it did for the route parser in `map.mjs`.
  */
 function skipString(text, i) {
   const q = text[i];
