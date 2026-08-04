@@ -201,27 +201,49 @@ export function rlsFromMigrations(root) {
       const drop = /^\s*DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(.+)$/is.exec(stmt);
       if (drop) {
         for (const name of drop[1].split(",")) {
-          const bare = /^\s*(?:public\.)?"?([\w ]+)"?/.exec(name.replace(/\b(CASCADE|RESTRICT)\b/i, "").trim());
-          if (bare) delete out[bare[1].trim()];
+          const bare = qualifiedName(name.replace(/\b(CASCADE|RESTRICT)\b/i, ""));
+          if (bare) delete out[bare];
         }
         continue;
       }
-      const enable = /^\s*ALTER\s+TABLE\s+(?:public\.)?"?(\w+)"?[\s\S]*ENABLE\s+ROW\s+LEVEL\s+SECURITY/i.exec(stmt);
-      if (enable) {
-        (out[enable[1]] ??= { enabled: false, commands: new Set() }).enabled = true;
+      const rls = /^\s*ALTER\s+TABLE\s+(.+?)\s+(ENABLE|DISABLE)\s+ROW\s+LEVEL\s+SECURITY/is.exec(stmt);
+      if (rls) {
+        const name = qualifiedName(rls[1]);
+        // DISABLE is as real a statement as ENABLE. Recognising only one direction meant a table
+        // whose RLS was later turned off still reported it on — overstating protection, which is
+        // the one error this field must never make.
+        if (name) (out[name] ??= { enabled: false, policies: new Map() }).enabled = /ENABLE/i.test(rls[2]);
+        continue;
+      }
+      // Policies are tracked by name, not as a bare set of commands, so a DROP POLICY can remove
+      // exactly the one it names rather than guessing which command to withdraw.
+      const drops = /^\s*DROP\s+POLICY\s+(?:IF\s+EXISTS\s+)?("[^"]*"|\w+)\s+ON\s+(.+)$/is.exec(stmt);
+      if (drops) {
+        const name = qualifiedName(drops[2]);
+        out[name]?.policies.delete(drops[1].replace(/^"|"$/g, ""));
         continue;
       }
       // The policy name is consumed as a whole quoted string before ON is looked for; scanning
       // loosely for " ON " found it inside names like "manage fields on own templates".
-      const policy = /^\s*CREATE\s+POLICY\s+(?:IF NOT EXISTS\s+)?(?:"[^"]*"|\w+)\s+ON\s+(?:public\.)?"?(\w+)"?([\s\S]*)$/i.exec(stmt);
+      const policy = /^\s*CREATE\s+POLICY\s+(?:IF NOT EXISTS\s+)?("[^"]*"|\w+)\s+ON\s+(\S+)([\s\S]*)$/i.exec(stmt);
       if (policy) {
-        const entry = (out[policy[1]] ??= { enabled: false, commands: new Set() });
-        const cmd = /\bFOR\s+(ALL|SELECT|INSERT|UPDATE|DELETE)\b/i.exec(policy[2]);
-        entry.commands.add(cmd ? cmd[1].toLowerCase() : "all");
+        const name = qualifiedName(policy[2]);
+        const entry = (out[name] ??= { enabled: false, policies: new Map() });
+        const cmd = /\bFOR\s+(ALL|SELECT|INSERT|UPDATE|DELETE)\b/i.exec(policy[3]);
+        entry.policies.set(policy[1].replace(/^"|"$/g, ""), cmd ? cmd[1].toLowerCase() : "all");
       }
     }
   }
   return out;
+}
+
+/**
+ * The table identifier from a possibly schema-qualified, possibly quoted target.
+ * `"public"."retired"` captured `public` and left `retired` on the map.
+ */
+function qualifiedName(raw) {
+  const parts = [...raw.trim().matchAll(/"([^"]+)"|([\w]+)/g)].map((m) => m[1] ?? m[2]);
+  return parts.length ? parts[parts.length - 1] : null;
 }
 
 /**
@@ -349,7 +371,7 @@ export function extractResources(root) {
       scope: d ? (d.scope ?? "unknown") : "unknown",
       debt: d ? String(d.debt) : "unknown",
       fields: d?.fields ?? [],
-      rls: rls[name] ? [...rls[name].commands].sort() : [],
+      rls: rls[name] ? [...new Set(rls[name].policies.values())].sort() : [],
       rls_enabled: rls[name] ? String(rls[name].enabled) : "unknown",
       reached_from_src: String(Boolean(inApp)),
       used_by: usedBy,

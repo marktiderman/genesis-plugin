@@ -319,6 +319,41 @@ describe("resources", () => {
     return root;
   };
 
+  test("a dropped policy and a disabled RLS are both replayed", () => {
+    // The replay knew three statement kinds and ignored the rest, so a table whose policy was
+    // removed or whose RLS was turned off still reported the protection it used to have —
+    // overstating access, the one direction this field must never fail.
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    mkdirSync(join(root, "supabase/migrations"), { recursive: true });
+    writeFileSync(
+      join(root, "supabase/migrations/0001.sql"),
+      `ALTER TABLE public.guarded ENABLE ROW LEVEL SECURITY;\n` +
+        `CREATE POLICY "readers" ON public.guarded FOR SELECT USING (true);\n` +
+        `CREATE POLICY "writers" ON public.guarded FOR INSERT WITH CHECK (true);\n`,
+    );
+    writeFileSync(
+      join(root, "supabase/migrations/0002.sql"),
+      `DROP POLICY IF EXISTS "readers" ON public.guarded;\n` +
+        `ALTER TABLE public.guarded DISABLE ROW LEVEL SECURITY;\n`,
+    );
+    run(root);
+    const r = rows(root, "resources").guarded;
+    assert.deepEqual(r.rls, ["insert"], "the dropped policy is still reported");
+    assert.equal(r.rls_enabled, "false", "RLS reported on after it was disabled");
+  });
+
+  test("drops a table named with a quoted schema qualifier", () => {
+    // `DROP TABLE "public"."retired"` captured `public` and left `retired` on the map.
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    mkdirSync(join(root, "supabase/migrations"), { recursive: true });
+    writeFileSync(join(root, "supabase/migrations/0001.sql"), 'ALTER TABLE public.retired ENABLE ROW LEVEL SECURITY;\n');
+    writeFileSync(join(root, "supabase/migrations/0002.sql"), 'DROP TABLE IF EXISTS "public"."retired";\n');
+    run(root);
+    const r = rows(root, "resources");
+    assert.ok(!r.retired, "a quoted-qualified drop left the table on the map");
+    assert.ok(!r.public, "captured the schema name as a table");
+  });
+
   test("a table dropped below its own policies is still dropped", () => {
     // Three passes over one file applied every DROP before any CREATE POLICY was read, so a table
     // dropped after its policies came back to life — the same direction as the defect this whole
