@@ -75,6 +75,17 @@ into one "exists" flag, **because the disagreements are the point.** A table wit
 no type file knows about and no screen reaches is only visible if `declared`, `rls_enabled` and
 `reached_from_src` are allowed to contradict each other on the same row.
 
+`backing` is the reconciled verdict, and it consults the migrations: `jsonb`, `supabase` (in the
+generated types), `migration` (created by a migration here, absent from those types), `edge-only`
+(named by a function and nothing else), `orphan` (named by nothing that defines it). Without the
+`migration` rung a monorepo whose data layer *is* its migrations reported 26 of 28 tables as
+`edge-only` or `orphan` while creating every one of them.
+
+`reached_from_src` counts three forms — `.from("x")`, the legacy `TABLES.KEY` constant, and a name
+the resource registry already declared appearing as a call's first argument, which is how a
+resource routed through a data-provider switchboard is written (`useResource("tasks")`). The third
+is bounded by the declaration: it can confirm a reach, never invent a table from a string.
+
 Where a legacy and a typed table share a name — one app had `Coaches` and `coaches` — the id is
 qualified by backing rather than letting one row overwrite the other.
 
@@ -93,18 +104,34 @@ innermost non-chrome components, not `<Route` tags: one app's 104 route tags are
 `<Navigate>`s, legacy redirects and the same page mounted in five scopes are set aside, and a
 denominator nothing can reach reports blindness where there is none.
 
+Same unit is not the same predicate. The denominator counts every component a route mounts —
+including the data-router `Component={Foo}` form the extractor cannot turn into a row — while the
+numerator counts the ones that became rows. Computing both from one predicate made the row read
+`42 / 42` forever: two real screens could land in a form the parser does not read and the number
+would not move, which is improving a ratio by shrinking its denominator.
+
+A denominator of `0` is not a fact on its own. Where the row's source can be absent, unreadable, or
+genuinely empty, the note says which — `no src/App.tsx` and `src/App.tsx present but no <Route
+element={<X/>}> the parser can read` are different sentences, and the second is the one a repo with
+a `createBrowserRouter` gets.
+
 ## What `check` reports
 
 | mark | finding | exit |
 | --- | --- | --- |
 | `+` `-` `~` | a screen, resource, or the blind-spots ledger appeared, vanished, or changed | 1 |
-| `!` | a feature whose globs match nothing **in a directory this tool extracts** | 1 |
+| `!` | a feature whose `owns:` globs match **no file on disk** | 1 |
 | `?` | a screen no feature's `owns:` glob claims | 0 |
 | `·` | a source this repo does not have, so that half was not extracted | 0 |
 
 The committed rows are the baseline; `check` compares a fresh extraction against them.
 
-**Only stale facts fail.** `+ - ~ !` mean the committed map is untrue, and one `sync` fixes it.
+**Only stale facts fail.** `+ - ~` mean the committed map is untrue, and one `sync` fixes it. `!`
+is stale too, but in the one table `sync` never writes — the glob names a path that is not there,
+and the fix is to correct the glob or delete the row, so it is reported and remedied separately.
+The globs are matched against the filesystem, not against the extracted rows: a feature owning a
+live file that is simply not a routed screen — a dashboard reached through a dispatcher — is not
+dead, and used to fail a gate no command could clear.
 `?` and `·` are gap reports — the parts of the app serving no articulated job, and the parts of
 this app's stack the repo does not have — and on an existing codebase `?` starts at nearly every
 screen. Failing on those would make the gate unusable the day it is installed, and a check nobody
@@ -127,7 +154,8 @@ owns: ["src/pages/CheckIns*", "src/components/forms/CreateCheckInForm.tsx"]
 
 **Then it runs itself.** `check` exits non-zero the moment the committed map stops matching the
 code, so it belongs in a pre-push hook and in CI. A new screen fails until it is synced; a feature
-pointing at deleted code fails until it is fixed. A screen with no owner does not fail — it waits.
+whose globs match no file fails until the glob is fixed. A screen with no owner does not fail — it
+waits.
 
 A CI runner has no plugins, so `${CLAUDE_PLUGIN_ROOT}` is not there: point the build at a checkout
 of this repo, **pinned to a commit**, or a change to the extractor breaks a build that did not
@@ -145,9 +173,10 @@ of reach, and a missing screen looks identical to a screen that does not exist:
   guard is not extracted, so the sign-in page and the catch-all 404 read as prefix-less like any
   personal screen. Do not read `personal` as "shows a person's own data".
 - a component named `Navigate`, or ending `Layout`, `Guard`, `Provider`, `Boundary`, `Redirect` or
-  `ScopeResolver`, is treated as chrome and omitted. A real screen named that way is omitted too.
-- `!` is withheld for globs pointing outside the directories it extracts from. A feature owning
-  only an edge function is not dead, and reporting it would be a false positive nothing can clear.
+  `ScopeResolver`, is treated as chrome and omitted. A real screen named that way is omitted too —
+  on both sides of the blind-spots fraction, so that one is invisible there as well.
+- `!` asks the filesystem, so a feature owning only an edge function or a shared hook is not dead:
+  those files exist. It fires only when nothing on disk matches any glob the feature declares.
 
 Affordances are import names ending in `Form`, `Dialog`, `Sheet`, `Panel`, or `Modal`, taken from
 the app's own modules — a design system's `Dialog` primitive is not a verb. A dialog named
@@ -179,9 +208,11 @@ every screen under `personal`.
 
 **No single file is required.** The two extractors are independent: a repo with no React Router
 still has a data layer, and a repo with no migrations still has screens. A source this repo does
-not have is reported as `·` and the other half runs anyway. The tool fails only when *every*
-source is missing — a stack it cannot read at all — because writing "no screens, no tables" for
-one would be a confident, wrong fact, which is the failure the whole map exists to avoid.
+not have is reported as `·` and the other half runs anyway. The tool fails only when *nothing at
+all* was extracted and no map is already committed — a stack it cannot read — because writing "no
+screens, no tables" for one would be a confident, wrong fact, which is the failure the whole map
+exists to avoid. That is asked of what was read, not of what is on disk: the same guard phrased as
+`existsSync` could not fire for any repo with a directory named `src`, which is every repo.
 
 A table whose sources are all absent is left alone entirely: not written, not emptied. If rows for
 it are already committed and the source has since vanished, that fails rather than wiping them —

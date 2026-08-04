@@ -142,15 +142,35 @@ export function unparsedLegacyTableFile(root) {
   return present.length > 0 && Object.keys(legacyTables(root)).length === 0 ? present : null;
 }
 
+/** Where the generated types' table block begins. Named so the reader and its state agree. */
+const TABLES_ANCHOR = "    Tables: {";
+
+/**
+ * Whether the generated types were absent, unreadable, or read — the same distinction
+ * `unparsedLegacyTableFile` draws, for the same reason.
+ *
+ * A denominator of 0 typed tables has three causes and the ledger stated only one of them. A repo
+ * with no `types.ts` and a repo whose `types.ts` this parser cannot follow produced byte-identical
+ * output, and `missingSources` is existence-only so the present-but-unreadable case printed no
+ * `·` either. "This repo has no typed tables" is a fact; "I could not read the file that would
+ * have told me" is not the same fact.
+ */
+export function typedTablesState(root) {
+  const p = join(root, TYPES_FILE);
+  if (!existsSync(p)) return "absent";
+  // The reader's own anchor, so the two cannot disagree: `typedTables` gives up exactly here.
+  return readFileSync(p, "utf8").includes(TABLES_ANCHOR) ? "read" : "unreadable";
+}
+
 /** Table names in the generated Supabase types — the typed half of the data plane. */
 export function typedTables(root) {
   const p = join(root, TYPES_FILE);
   if (!existsSync(p)) return [];
   const src = readFileSync(p, "utf8");
-  const start = src.indexOf("    Tables: {");
+  const start = src.indexOf(TABLES_ANCHOR);
   if (start === -1) return [];
   // The block ends at the next key at the same indent (Views/Functions/Enums).
-  const rest = src.slice(start + 13);
+  const rest = src.slice(start + TABLES_ANCHOR.length);
   const end = rest.search(/\n {4}\w+: \{/);
   const block = end === -1 ? rest : rest.slice(0, end);
   return [...block.matchAll(/^ {6}(\w+): \{$/gm)].map((m) => m[1]).sort();
@@ -201,14 +221,27 @@ export function declaredResources(root, tables) {
 /**
  * Table references in a tree, mapped table -> the files that reach it.
  *
- * Two forms, because this app addresses its two halves differently: `.from("x")` for typed
- * Supabase tables, and `TABLES.KEY` for the legacy jsonb ones. Counting only `.from()` reported
- * every legacy table as unreached from `src/` — 24 rows saying the app never touches data it
- * touches on nearly every screen.
+ * Three forms, because an app addresses its data through more than one seam: `.from("x")` for a
+ * direct client call, `TABLES.KEY` for the legacy jsonb constants, and — for a resource the
+ * registry has already declared by name — that name passed as a call's first argument, which is
+ * how a resource reached through a data-provider switchboard is written (`useResource("tasks")`).
+ *
+ * Counting only `.from()` reported every legacy table as unreached from `src/` — 24 rows saying
+ * the app never touches data it touches on nearly every screen — and, later, reported six of the
+ * seven resources routed through the provider as reached by nothing, which is precisely the
+ * "a table no screen reaches" finding this column exists to raise.
+ *
+ * The third form is bounded by `addressed`: only names a declaration already established as
+ * resource names are looked for, so this can confirm a reach but can never invent a table out of
+ * a string literal. It reads the declaration; it does not guess at one.
  */
-export function tableRefs(dir, tables, { label = (f) => f } = {}) {
+export function tableRefs(dir, tables, { label = (f) => f, addressed = [] } = {}) {
   const hits = {};
   const byKey = Object.entries(tables);
+  const addressedRe = addressed.map((name) => [
+    name,
+    new RegExp(String.raw`\(\s*["']${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']\s*[,)]`),
+  ]);
   const walk = (d) => {
     let entries;
     try {
@@ -233,6 +266,9 @@ export function tableRefs(dir, tables, { label = (f) => f } = {}) {
       for (const [key, name] of byKey) {
         if (new RegExp(`\\bTABLES\\.${key}\\b`).test(src)) (hits[name] ??= new Set()).add(label(path));
       }
+      for (const [name, re] of addressedRe) {
+        if (re.test(src)) (hits[name] ??= new Set()).add(label(path));
+      }
     }
   };
   walk(dir);
@@ -240,13 +276,40 @@ export function tableRefs(dir, tables, { label = (f) => f } = {}) {
 }
 
 /**
- * RLS as the migrations describe it. This is NOT the deployed policy set — a policy changed
- * through the dashboard never appears here — so it is recorded as "what the repo claims" and
- * left for the verification pass to confirm.
+ * A table name as SQL writes it: optionally quoted, optionally schema-qualified.
+ *
+ * Named once because three statement patterns need the same shape. Each of them used to end its
+ * table position with a loose `(.+)`/`(.+?)` and lean on `qualifiedName` taking the last word —
+ * which silently makes any trailing keyword the table. `ALTER TABLE t ADD COLUMN n integer,
+ * ENABLE ROW LEVEL SECURITY` recorded a table called `integer`, and `DROP POLICY p ON t CASCADE`
+ * dropped a policy from a table called `CASCADE`. Both are ordinary Postgres.
  */
-export function rlsFromMigrations(root) {
+const IDENT = String.raw`(?:"[^"]+"|\w+)(?:\s*\.\s*(?:"[^"]+"|\w+))*`;
+
+/**
+ * `ALTER TABLE [IF EXISTS] [ONLY] name [*] action [, ...]` — the header, and the action list whole.
+ *
+ * The name is bounded by the grammar rather than by "whatever precedes the keyword I want",
+ * because a statement may carry several actions and the one being looked for need not be first.
+ */
+const ALTER_TABLE = new RegExp(String.raw`^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(${IDENT})\s*\*?\s+([\s\S]+)$`, "i");
+/** ENABLE/DISABLE (never FORCE — that does not change whether RLS is on) among those actions. */
+const RLS_ACTION = /\b(ENABLE|DISABLE)\s+ROW\s+LEVEL\s+SECURITY\b/gi;
+const CREATE_TABLE = new RegExp(String.raw`^\s*CREATE\s+(?:(?:GLOBAL|LOCAL|TEMP|TEMPORARY|UNLOGGED)\s+)*TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(${IDENT})`, "i");
+const DROP_POLICY = new RegExp(String.raw`^\s*DROP\s+POLICY\s+(?:IF\s+EXISTS\s+)?("[^"]*"|\w+)\s+ON\s+(${IDENT})`, "is");
+const CREATE_POLICY = new RegExp(String.raw`^\s*CREATE\s+POLICY\s+(?:IF\s+NOT\s+EXISTS\s+)?("[^"]*"|\w+)\s+ON\s+(${IDENT})([\s\S]*)$`, "i");
+
+/**
+ * What the migrations say about each table: whether this repo creates it, and its RLS.
+ *
+ * This is NOT the deployed schema or policy set — a table or policy changed through the dashboard
+ * never appears here — so it is recorded as "what the repo claims" and left for the verification
+ * pass to confirm.
+ */
+export function migrationFacts(root) {
   const dir = join(root, MIGRATIONS_DIR);
-  if (!existsSync(dir)) return {};
+  const created = new Set();
+  if (!existsSync(dir)) return { rls: {}, created };
   const out = {};
   for (const file of readdirSync(dir).sort()) {
     if (!file.endsWith(".sql")) continue;
@@ -260,22 +323,39 @@ export function rlsFromMigrations(root) {
       if (drop) {
         for (const name of drop[1].split(",")) {
           const bare = qualifiedName(name.replace(/\b(CASCADE|RESTRICT)\b/i, ""));
-          if (bare) delete out[bare];
+          if (bare) {
+            delete out[bare];
+            created.delete(bare);
+          }
         }
         continue;
       }
-      const rls = /^\s*ALTER\s+TABLE\s+(.+?)\s+(ENABLE|DISABLE)\s+ROW\s+LEVEL\s+SECURITY/is.exec(stmt);
-      if (rls) {
-        const name = qualifiedName(rls[1]);
-        // DISABLE is as real a statement as ENABLE. Recognising only one direction meant a table
-        // whose RLS was later turned off still reported it on — overstating protection, which is
-        // the one error this field must never make.
-        if (name) (out[name] ??= { enabled: false, policies: new Map() }).enabled = /ENABLE/i.test(rls[2]);
+      const create = CREATE_TABLE.exec(stmt);
+      if (create) {
+        const name = qualifiedName(create[1]);
+        if (name) created.add(name);
+        continue;
+      }
+      const alter = ALTER_TABLE.exec(stmt);
+      if (alter) {
+        const name = qualifiedName(alter[1]);
+        // The action list is searched whole, and only for the RLS action. `ALTER TABLE t ADD
+        // COLUMN n integer, ENABLE ROW LEVEL SECURITY` is one legal statement with two actions;
+        // reading the name as "everything before the first ENABLE" made `integer` a table with
+        // RLS on and left the real one reported as having none.
+        const actions = [...alter[2].matchAll(RLS_ACTION)];
+        // Last wins: Postgres applies actions in order. DISABLE is as real a statement as ENABLE.
+        // Recognising only one direction meant a table whose RLS was later turned off still
+        // reported it on — overstating protection, which is the one error this field must never
+        // make. Applying it to the wrong table is the same error by another route.
+        if (name && actions.length) {
+          (out[name] ??= { enabled: false, policies: new Map() }).enabled = /ENABLE/i.test(actions.at(-1)[1]);
+        }
         continue;
       }
       // Policies are tracked by name, not as a bare set of commands, so a DROP POLICY can remove
       // exactly the one it names rather than guessing which command to withdraw.
-      const drops = /^\s*DROP\s+POLICY\s+(?:IF\s+EXISTS\s+)?("[^"]*"|\w+)\s+ON\s+(.+)$/is.exec(stmt);
+      const drops = DROP_POLICY.exec(stmt);
       if (drops) {
         const name = qualifiedName(drops[2]);
         out[name]?.policies.delete(drops[1].replace(/^"|"$/g, ""));
@@ -283,7 +363,7 @@ export function rlsFromMigrations(root) {
       }
       // The policy name is consumed as a whole quoted string before ON is looked for; scanning
       // loosely for " ON " found it inside names like "manage fields on own templates".
-      const policy = /^\s*CREATE\s+POLICY\s+(?:IF NOT EXISTS\s+)?("[^"]*"|\w+)\s+ON\s+(\S+)([\s\S]*)$/i.exec(stmt);
+      const policy = CREATE_POLICY.exec(stmt);
       if (policy) {
         const name = qualifiedName(policy[2]);
         const entry = (out[name] ??= { enabled: false, policies: new Map() });
@@ -292,7 +372,7 @@ export function rlsFromMigrations(root) {
       }
     }
   }
-  return out;
+  return { rls: out, created };
 }
 
 /**
@@ -369,8 +449,11 @@ const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g
 /**
  * One row per resource, reconciled across every source.
  *
- * `backing` says where it lives; `declared` says whether a human wrote it down. A resource can be
- * real and undeclared (`edge-only`), which is the finding this table exists to surface.
+ * `backing` says where it lives — `jsonb` (a legacy content constant), `supabase` (in the
+ * generated types), `migration` (created by a migration here but absent from those types),
+ * `edge-only` (named by an edge function and nowhere else) or `orphan` (named by nothing that
+ * defines it). `declared` says whether a human wrote it down. A resource can be real and
+ * undeclared, which is the finding this table exists to surface.
  */
 export function extractResources(root) {
   const tables = legacyTables(root);
@@ -378,10 +461,14 @@ export function extractResources(root) {
   const typed = typedTables(root);
   const declared = declaredResources(root, tables);
   const declaredBy = new Map(declared.map((d) => [d.name, d]));
-  const appHits = tableRefs(join(root, SRC_DIR), tables);
+  // The registry's `name` is documented as "the name exactly as `useResource(name)` / the router
+  // addresses it", so it is the declaration that licenses looking for that literal in a call.
+  const addressed = declared.map((d) => d.name);
+  const appHits = tableRefs(join(root, SRC_DIR), tables, { addressed });
   const fnDir = join(root, FUNCTIONS_DIR);
   const fnHits = existsSync(fnDir)
     ? tableRefs(fnDir, tables, {
+        addressed,
         // `_shared/` is helper modules rather than a function, so it is an imprecise consumer
         // label — but skipping the directory deleted the only evidence for tables reached solely
         // through a helper, dropping those rows from the map entirely. A rough label beats a
@@ -389,7 +476,7 @@ export function extractResources(root) {
         label: (f) => f.slice(fnDir.length + 1).split("/")[0],
       })
     : {};
-  const rls = rlsFromMigrations(root);
+  const { rls, created } = migrationFacts(root);
 
   const names = [
     ...new Set([
@@ -399,6 +486,7 @@ export function extractResources(root) {
       ...Object.keys(appHits),
       ...Object.keys(fnHits),
       ...Object.keys(rls),
+      ...created,
     ]),
   ].sort();
 
@@ -412,13 +500,22 @@ export function extractResources(root) {
     const d = declaredBy.get(name);
     const inApp = appHits[name]?.size > 0;
     const usedBy = [...(fnHits[name] ?? [])].sort();
+    // `migration` sits above `edge-only`/`orphan` because a `CREATE TABLE` in this repo's own
+    // migrations is the strongest statement of where a table lives that a repo can make, and the
+    // ladder used never to consult it: a monorepo whose data layer is migrations and edge
+    // functions — no generated types, no `src/` — reported 26 of its 28 tables as `edge-only`
+    // ("exists only because a function names it") or `orphan` ("nothing defines or reaches it")
+    // while its own migrations create every one. Three of those rows said `rls_enabled: "true"`
+    // and `backing: "orphan"` side by side, which cannot both be read from the same file.
     const backing = legacyNames.includes(name)
       ? "jsonb"
       : typed.includes(name)
         ? "supabase"
-        : usedBy.length
-          ? "edge-only"
-          : "orphan";
+        : created.has(name)
+          ? "migration"
+          : usedBy.length
+            ? "edge-only"
+            : "orphan";
     return {
       id: slugCounts[slug(name)] > 1 ? `${slug(name)}--${backing}` : slug(name),
       name,

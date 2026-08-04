@@ -327,6 +327,73 @@ describe("resources", () => {
     return root;
   };
 
+  /** A repo whose only data layer is one migration file. */
+  const migrationRepo = (sql) => {
+    const root = bare();
+    mkdirSync(join(root, "supabase/migrations"), { recursive: true });
+    writeFileSync(join(root, "supabase/migrations/0001.sql"), sql, "utf8");
+    return root;
+  };
+
+  test("reads the table from an ALTER TABLE that carries more than one action", () => {
+    // `ALTER TABLE name action [, ...]` is ordinary Postgres, and the name was read as "whatever
+    // precedes the first ENABLE". So this recorded a table called `integer` with RLS on and left
+    // `ledger` — the real table — reported as having none: a security-posture record inverted on
+    // both rows, at exit 0.
+    const root = migrationRepo(
+      "CREATE TABLE public.ledger (id uuid primary key);\n" +
+        "ALTER TABLE public.ledger ADD COLUMN amount integer, ENABLE ROW LEVEL SECURITY;\n" +
+        "ALTER TABLE public.acct FORCE ROW LEVEL SECURITY, ENABLE ROW LEVEL SECURITY;\n" +
+        "ALTER TABLE public.owned OWNER TO postgres, ENABLE ROW LEVEL SECURITY;\n",
+    );
+    assert.equal(run(root).code, 0);
+    const r = rows(root, "resources");
+    assert.deepEqual(Object.keys(r).sort(), ["acct", "ledger", "owned"]);
+    for (const id of ["acct", "ledger", "owned"]) assert.equal(r[id].rls_enabled, "true", id);
+  });
+
+  test("applies a multi-action DISABLE to the table it names, not to a column type", () => {
+    // Worse than a phantom row: the DISABLE landed on a table called `text` and the real one kept
+    // `rls_enabled: "true"` — overstating protection, which the replay's own comment calls the one
+    // error this field must never make.
+    const root = migrationRepo(
+      "ALTER TABLE ledger ENABLE ROW LEVEL SECURITY;\n" +
+        "ALTER TABLE ledger ADD COLUMN note text, DISABLE ROW LEVEL SECURITY;\n",
+    );
+    assert.equal(run(root).code, 0);
+    const r = rows(root, "resources");
+    assert.deepEqual(Object.keys(r), ["ledger"]);
+    assert.equal(r.ledger.rls_enabled, "false", "a DISABLE applied to a phantom table protects nothing");
+  });
+
+  test("drops the policy a DROP POLICY ... CASCADE names", () => {
+    // `DROP POLICY [IF EXISTS] name ON table [CASCADE|RESTRICT]` is valid Postgres. The trailing
+    // keyword became the table name, so the delete was a silent no-op against `out["CASCADE"]` and
+    // the map kept listing a write path that had been removed.
+    const root = migrationRepo(
+      'ALTER TABLE public.notes ENABLE ROW LEVEL SECURITY;\n' +
+        'CREATE POLICY "read notes" ON public.notes FOR SELECT USING (true);\n' +
+        'CREATE POLICY "write notes" ON public.notes FOR INSERT WITH CHECK (true);\n' +
+        'DROP POLICY IF EXISTS "write notes" ON public.notes CASCADE;\n',
+    );
+    assert.equal(run(root).code, 0);
+    assert.deepEqual(rows(root, "resources").notes.rls, ["select"]);
+  });
+
+  test("says a table is backed by a migration this repo writes, not by the function that reads it", () => {
+    // The ladder consulted legacy constants, generated types and `.from()` hits, and never the
+    // migrations — though the RLS replay had just read `create table` in the same statement list.
+    // A monorepo with no `src/` reported 26 of its 28 tables as `edge-only` ("exists only because
+    // a function names it") or `orphan` ("nothing defines or reaches it") while creating every one
+    // of them, three of those rows carrying `rls_enabled: "true"` beside `backing: "orphan"`.
+    const root = migrationRepo(
+      "create table if not exists public.agent_notes (id uuid primary key);\n" +
+        "alter table public.agent_notes enable row level security;\n",
+    );
+    assert.equal(run(root).code, 0);
+    assert.equal(rows(root, "resources")["agent-notes"].backing, "migration");
+  });
+
   test("a dropped policy and a disabled RLS are both replayed", () => {
     // The replay knew three statement kinds and ignored the rest, so a table whose policy was
     // removed or whose RLS was turned off still reported the protection it used to have —
@@ -566,6 +633,36 @@ describe("resources", () => {
     run(root);
     assert.equal(rows(root, "resources").people.reached_from_src, "true");
   });
+
+  test("counts a declared resource reached through the provider, not only through .from()", () => {
+    // An app that routes reads through a data-provider switchboard never writes `.from("tasks")`
+    // — it writes `useResource("tasks")`, the exact form the registry's `name` is documented as.
+    // Six of the seven resources on that path reported `reached_from_src: "false"`, which is the
+    // "a table no screen reaches" finding the column exists to raise, raised falsely six times.
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    const put = (rel, text) => {
+      mkdirSync(join(root, rel, ".."), { recursive: true });
+      writeFileSync(join(root, rel), text, "utf8");
+    };
+    put(
+      "src/lib/resource-registry.ts",
+      `const R = [defineResource({\n  name: "tasks",\n  backing: "supabase",\n  fields: {\n    title: "string",\n  },\n  scope: "none",\n})];\n`,
+    );
+    put("src/hooks/use-execution.ts", 'export const useTasks = () => useScopedResource<Task>("tasks", filters, {});\n');
+    run(root);
+    assert.equal(rows(root, "resources").tasks.reached_from_src, "true");
+  });
+
+  test("does not invent a resource from a string literal that no declaration names", () => {
+    // The licence for reading a bare literal is the declaration, and nothing else. Without that
+    // bound this is the guessing the registry exists to replace: every `t("habits")` in a UI
+    // string table would mint a data noun.
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    mkdirSync(join(root, "src/hooks"), { recursive: true });
+    writeFileSync(join(root, "src/hooks/use-copy.ts"), 'export const label = t("invoices");\n');
+    run(root);
+    assert.equal(rows(root, "resources").invoices, undefined);
+  });
 });
 
 describe("the owns join", () => {
@@ -629,8 +726,14 @@ describe("the owns join", () => {
 
   test("does not report a feature owning code this extractor cannot see", () => {
     // `owns: [supabase/functions/**]` is a real claim about real code. Reporting it as dead is a
-    // permanent false positive no action can clear.
-    const r = run(withFeature('owns: ["supabase/functions/**"]'), "check");
+    // permanent false positive no action can clear. The claim is real because the file is there —
+    // the fixture used to assert the withholding rule against a directory it never created, which
+    // passed for the wrong reason and licensed a heuristic that guessed from surface rows.
+    const root = withFeature('owns: ["supabase/functions/**"]');
+    mkdirSync(join(root, "supabase/functions/notify"), { recursive: true });
+    writeFileSync(join(root, "supabase/functions/notify/index.ts"), "export default () => null;\n");
+    run(root);
+    const r = run(root, "check");
     assert.doesNotMatch(r.out, /owns nothing/);
     // Asserting the absence of a string also passes when the tool crashes, so pin the exit code
     // and one positive fact: this test used to survive `throw` at the top of report().
@@ -638,10 +741,43 @@ describe("the owns join", () => {
     assert.match(r.out, /surface\(s\), \d+ resource\(s\) extracted/);
   });
 
-  test("still reports a feature whose globs point into extracted territory and match nothing", () => {
+  test("does not report a feature owning a live file that is not a routed screen", () => {
+    // `!` said "owns nothing" about `src/pages/ClientDashboard.tsx` — 11 KB of live code reached
+    // through a dispatcher rather than a `<Route>`. The glob was matched against surface ROWS, so
+    // a real file in the extracted directory read as deleted code, the gate went red, and the
+    // remedy it printed (`run cartography sync`) could never clear it: sync does not write
+    // data/features/, and the file it named was on disk the whole time.
+    const root = withFeature('owns: ["src/pages/Dispatched.tsx"]');
+    writeFileSync(join(root, "src/pages/Dispatched.tsx"), "export default function Dispatched(){return null}\n");
+    run(root);
+    const r = run(root, "check");
+    assert.doesNotMatch(r.out, /owns nothing/, "a file that exists is not deleted code");
+    assert.equal(r.code, 0, "a gate no sync can clear is a gate that gets deleted");
+  });
+
+  test("accepts a feature owning a directory, not only a file glob", () => {
+    // `owns: ["packages/"]` is how people write "this whole directory" — five of one consumer's
+    // 108 features do — and a file-only match reports every one of them as owning nothing while
+    // the directory is on disk. A permanent red gate is the failure this mark exists to avoid.
+    const root = withFeature('owns: ["packages/"]');
+    mkdirSync(join(root, "packages/core"), { recursive: true });
+    writeFileSync(join(root, "packages/core/index.ts"), "export const x = 1;\n");
+    run(root);
+    const r = run(root, "check");
+    assert.doesNotMatch(r.out, /owns nothing/);
+    assert.equal(r.code, 0);
+  });
+
+  test("still reports a feature whose globs match no file, and does not blame sync for it", () => {
     const r = run(withFeature('owns: ["src/pages/Deleted.tsx"]'), "check");
     assert.match(r.out, /owns nothing/);
     assert.equal(r.code, 1, "a feature pointing at deleted code must fail the gate");
+    assert.match(r.out, /own no file that exists/, "the remedy must name the glob, not `sync`");
+    assert.doesNotMatch(
+      r.out,
+      /stale fact\(s\)/,
+      "`sync` never writes data/features/, so it cannot be the advice for this finding",
+    );
   });
 });
 
@@ -758,5 +894,77 @@ describe("the blind-spots ledger", () => {
     assert.equal(r.q.declared, "resource-registry.ts", "fixture no longer exercises the case");
     assert.equal(r.q.scope, "unknown", "fixture no longer exercises the case");
     assert.match(ledgerOf(root), /resources with a declared scope\s+1 \/ 2\s+1 declare a rule the parser cannot read/);
+  });
+
+  test("counts a routed screen the parser cannot turn into a row", () => {
+    // Numerator and denominator came from one predicate, so the fraction read 100% forever. Two
+    // real screens could land in the data-router `Component={Foo}` form — the modern React Router
+    // spelling, and one of the four blind spots SKILL.md lists — and `42 / 42` did not move,
+    // while the row's own note promised "a gap is a routed component that produced no row".
+    // Improving that ratio by shrinking its denominator is the failure this row exists to prevent.
+    const root = repo(
+      `<Route path="a" element={<Alpha />} />\n<Route path="audit" Component={AuditLog} />`,
+      { Alpha: "", AuditLog: "" },
+    );
+    run(root);
+    assert.deepEqual(Object.keys(rows(root)), ["alpha"], "the extractor still cannot read that form");
+    assert.match(ledgerOf(root), /screens routed in src\/App\.tsx\s+1 \/ 2\s+a gap is a routed component/);
+  });
+
+  test("does not say a router file is absent when it is present and unreadable", () => {
+    // The note was selected by "zero screens resolved", not by "the file is not there", so a repo
+    // whose App.tsx mounts screens through `createBrowserRouter` produced a note byte-identical to
+    // a repo with no App.tsx at all — and `missingSources` is existence-only, so no `·` corrected
+    // it. The one sentence about the surface layer was a checkable falsehood, at exit 0.
+    const root = bare();
+    mkdirSync(join(root, "src/pages"), { recursive: true });
+    mkdirSync(join(root, "supabase/migrations"), { recursive: true });
+    writeFileSync(join(root, "supabase/migrations/0001.sql"), "CREATE TABLE public.jobs (id uuid);\n");
+    writeFileSync(
+      join(root, "src/App.tsx"),
+      `import Home from "./pages/Home";\nconst router = createBrowserRouter([{ path: "/", Component: Home }]);\n`,
+    );
+    writeFileSync(join(root, "src/pages/Home.tsx"), "export default function Home(){return null}\n");
+    assert.equal(run(root).code, 0);
+    const ledger = ledgerOf(root);
+    assert.match(ledger, /screens routed in src\/App\.tsx\s+0 \/ 0\s+src\/App\.tsx present but no <Route/);
+    assert.doesNotMatch(ledger, /no src\/App\.tsx/, "the file it says is missing is on disk");
+
+    rmSync(join(root, "src/App.tsx"));
+    rmSync(join(root, "data"), { recursive: true });
+    run(root);
+    assert.match(ledgerOf(root), /screens routed in src\/App\.tsx\s+0 \/ 0\s+no src\/App\.tsx/);
+  });
+
+  test("does not say a repo has no typed tables when it has an unreadable types file", () => {
+    // Same conflation, one row down: `0 / 0` meant "no types.ts", "a types.ts this parser cannot
+    // follow", and "a schema with no tables" indistinguishably — while the ledger's preamble tells
+    // the reader every denominator was counted outside the map, so the zero reads as a fact.
+    const absent = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    run(absent);
+    assert.match(ledgerOf(absent), /typed tables reached from src\s+0 \/ 0\s+no src\/integrations\/supabase\/types\.ts/);
+
+    const unreadable = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    mkdirSync(join(unreadable, "src/integrations/supabase"), { recursive: true });
+    writeFileSync(
+      join(unreadable, "src/integrations/supabase/types.ts"),
+      "export type Database = { public: { Tables: { profiles: { Row: {} }, widgets: { Row: {} } } } }\n",
+    );
+    run(unreadable);
+    assert.match(ledgerOf(unreadable), /typed tables reached from src\s+0 \/ 0\s+src\/integrations\/supabase\/types\.ts present but no/);
+  });
+
+  test("refuses a repo that merely has a directory named src", () => {
+    // The all-sources-absent guard tested `existsSync`, and `RESOURCE_SOURCES` lists the whole
+    // `src` tree, so it could not fire for any repo with a `src/` — dead code for every JS/TS
+    // checkout there is. A repo holding one `src/a.ts` got a committed ledger of `0 / 0` rows and
+    // `check` held it green forever: the tool had read nothing and said so nowhere.
+    const root = bare();
+    mkdirSync(join(root, "src"), { recursive: true });
+    writeFileSync(join(root, "src/a.ts"), "export const a = 1;\n");
+    const r = run(root);
+    assert.equal(r.code, 1);
+    assert.match(r.out, /no extractable source/);
+    assert.equal(existsSync(join(root, LEDGER_PATH)), false, "an empty map was committed anyway");
   });
 });
