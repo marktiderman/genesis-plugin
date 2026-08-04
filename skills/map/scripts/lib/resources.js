@@ -286,6 +286,9 @@ const RESOURCE_CALL = String.raw`\b(?:use[A-Z]\w*|getList|getOne|getMany|create|
 export function tableRefs(dir, tables, { label = (f) => f, addressed = [] } = {}) {
   const hits = {};
   const byKey = Object.entries(tables);
+  // Compiled once, not once per file per key. The walk visits thousands of files and this pattern
+  // never varies within a run — `addressedMatchers` below already worked this way.
+  const legacyRe = byKey.map(([key, name]) => [new RegExp(String.raw`\bTABLES\.${key}\b`), name]);
   const addressedRe = addressedMatchers(addressed);
   const walk = (d) => {
     let entries;
@@ -308,8 +311,8 @@ export function tableRefs(dir, tables, { label = (f) => f, addressed = [] } = {}
       for (const m of src.matchAll(FROM_CALL_RE)) {
         (hits[m[1]] ??= new Set()).add(label(path));
       }
-      for (const [key, name] of byKey) {
-        if (new RegExp(`\\bTABLES\\.${key}\\b`).test(src)) (hits[name] ??= new Set()).add(label(path));
+      for (const [re, name] of legacyRe) {
+        if (re.test(src)) (hits[name] ??= new Set()).add(label(path));
       }
       for (const [name, re] of addressedRe) {
         if (re.test(src)) (hits[name] ??= new Set()).add(label(path));

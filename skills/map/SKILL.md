@@ -1,23 +1,49 @@
 ---
-name: cartography
+name: map
 description: >-
   Map a codebase into gitdata rows — extract every screen, the dialogs it opens, the scopes it is
-  reachable in, and which design system it leans on, then report what no feature claims. Use when
-  setting up a feature or flow registry, when asked "what screens do we have", "what does this app
-  actually do", "what is not covered", or to check a codebase map is still true after routes
-  change. Also use as a pre-push or CI check once a map exists.
+  reachable in, and which design system it leans on, then report what no feature claims. Also
+  verifies data/flows/ (every step names a real screen that exists), regenerates the human-facing
+  flows doc, and can serve a live scoreboard/dashboard over the whole map. Use when setting up a
+  feature or flow registry, when asked "what screens do we have", "what does this app actually
+  do", "what is not covered", or to check a codebase map is still true after routes change. Also
+  use as a pre-push or CI check once a map exists.
 ---
 
-# Cartography — the map the code already knows
+# Map — the map the code already knows
 
-A codebase knows its own structure and cannot state its own purpose. Cartography extracts the
-first and refuses to guess the second.
+A codebase knows its own structure and cannot state its own purpose. `map` extracts the first and
+refuses to guess the second.
+
+## The job this serves
+
+Before anyone builds, they need an inventory they can trust. Not a grep — an answer. *Does this
+already exist? Which files serve it? What would I break?*
+
+Without one, the only honest move is to invent, and inventing what already exists is how a codebase
+acquires two of everything. This map exists so **reuse and extend cost less than invent** — which
+they never do when the inventory is a guess.
+
+Every question a reader brings is that one at a different zoom: *what does this app do* is the
+flows, *what features does it have* is the features table, *is all of it written down* is the
+unclaimed count, *can I change this table safely* is its reach and the surfaces that read it.
+
+**What it will not answer.** It can show that two features own overlapping code. It cannot say they
+are the same job. Consolidation is a judgement about intent, and intent is the one thing extraction
+never recovers — the same reason features are authored rather than extracted. A reader deciding
+whether to merge two features gets evidence here and makes the call themselves.
+
+**The coverage fractions are inputs, not the outcome.** They measure how much of the inventory is
+written down. They do not measure whether it was used. What this is for is someone extending
+something instead of duplicating it *because the map told them it was there*, and no number in
+`data/` reports that.
 
 ```bash
-CARTO="${CLAUDE_PLUGIN_ROOT}/skills/cartography/scripts/cartography.mjs"
-node "$CARTO" init  --root .   # first run
-node "$CARTO" sync  --root .   # re-extract, report
-node "$CARTO" check --root .   # report only, exit 1 on stale facts
+MAP="${CLAUDE_PLUGIN_ROOT}/skills/map/scripts/map.mjs"
+node "$MAP" init  --root .   # first run
+node "$MAP" sync  --root .   # re-extract surfaces and resources, report
+node "$MAP" check --root .   # report only, exit 1 on stale facts — surfaces, resources, and flows
+node "$MAP" flows --root .   # regenerate the generated flows doc from data/flows/
 ```
 
 The script travels with the plugin — nothing to install, and `${CLAUDE_PLUGIN_ROOT}` resolves to
@@ -25,7 +51,7 @@ wherever it landed. It needs Node and a git checkout; that is all.
 
 ## The rule that makes it re-runnable
 
-**Two tables. The extractor rewrites one and never writes the other.**
+**Two tables. `sync` rewrites one and never writes the other.**
 
 | table | owner | on every run |
 | --- | --- | --- |
@@ -42,7 +68,7 @@ than a number in a console. Narrow a glob and the row changes; the check that wa
 generated fact watches that one too.
 
 Mixing generated and authored fields in one file makes every re-run a merge conflict. Splitting
-them makes regeneration safe by construction: nothing you wrote is at risk, because the extractor
+them makes regeneration safe by construction: nothing you wrote is at risk, because `sync`
 has no reason to write your file.
 
 Editing a feature's `owns:` therefore means re-running `sync` — the join moved.
@@ -136,10 +162,10 @@ literal is `listed`, not `test` — a real, if weak, non-test mention outranks a
 Where a legacy and a typed table share a name — one app had `Coaches` and `coaches` — the id is
 qualified by backing rather than letting one row overwrite the other.
 
-`data/_views/blind-spots.md` is written beside them: **how much of what exists the extractor can
+`data/_views/blind-spots.md` is written beside them: **how much of what exists map can
 see**, every denominator counted outside the map. Nothing you write in `data/` moves a number
-there; the only way to move one is to teach the extractor to see more. Expect the numbers to get
-worse when a new extractor lands — that is it working.
+there; the only way to move one is to teach map to see more. Expect the numbers to get
+worse when map gets better at reading the code — that is it working.
 
 That last claim is enforced, not asserted: `check` recomputes the ledger and compares it to the
 committed one, so a hand-edited number is drift and fails the gate exactly like a hand-edited row.
@@ -152,7 +178,7 @@ innermost non-chrome components, not `<Route` tags: one app's 104 route tags are
 denominator nothing can reach reports blindness where there is none.
 
 Same unit is not the same predicate. The denominator counts every component a route mounts —
-including the data-router `Component={Foo}` form the extractor cannot turn into a row — while the
+including the data-router `Component={Foo}` form this scan cannot turn into a row — while the
 numerator counts the ones that became rows. Computing both from one predicate made the row read
 `42 / 42` forever: two real screens could land in a form the parser does not read and the number
 would not move, which is improving a ratio by shrinking its denominator.
@@ -172,6 +198,13 @@ a `createBrowserRouter` gets.
 | `·` | a source this repo does not have, so that half was not extracted | 0 |
 
 The committed rows are the baseline; `check` compares a fresh extraction against them.
+
+`check` also verifies `data/flows/`, if a repo has one: every flow's `feature` resolves to a row
+in `data/features/`, every step names a surface that exists in `data/surfaces/`, and the rendered
+`docs/USER-FLOWS.md` matches what `flows` would write. A repo with no `data/flows/` directory is
+not using that table — reported as `·`, the same as any other absent source, never a failure.
+Flows are authored, not extracted, so nothing above touches `data/flows/` itself; this is the one
+place in `check` that reads it.
 
 **Only stale facts fail.** `+ - ~` mean the committed map is untrue, and one `sync` fixes it. `!`
 is stale too, but in the one table `sync` never writes — the glob names a path that is not there,
@@ -205,8 +238,20 @@ whose globs match no file fails until the glob is fixed. A screen with no owner 
 waits.
 
 A CI runner has no plugins, so `${CLAUDE_PLUGIN_ROOT}` is not there: point the build at a checkout
-of this repo, **pinned to a commit**, or a change to the extractor breaks a build that did not
-change.
+of this repo, **pinned to a commit**, or a change to map breaks a build that did not change.
+
+**Flows, once a repo authors them.** `data/flows/` is a third, human-authored table — an ordered
+walk through surfaces that already exist, reaching an outcome for an actor. `flows --root .`
+renders `docs/USER-FLOWS.md` from it; `check` verifies both that every reference resolves and that
+the rendered doc matches what is committed. Nothing here ever writes a flow row — same rule as
+`data/features/`. A repo with no `data/flows/` directory simply has nothing for either command to
+do there.
+
+**A live view.** `node "${CLAUDE_PLUGIN_ROOT}/skills/map/scripts/serve.mjs" --root .` regenerates
+the map, prints every fraction to stdout, and serves a dashboard over all four tables at
+`http://127.0.0.1:4321` (loopback only) — reading `data/` fresh on every request, so editing a row
+and reloading shows the change without a restart. `--no-serve` stops after the print, for CI or a
+script that only wants the numbers.
 
 ## What it cannot see
 
@@ -250,10 +295,10 @@ Five functions read this stack:
 
 | seam | assumes |
 | --- | --- |
-| `routeTokens` (`cartography.mjs`) | React Router JSX — `<Route>` tags in `src/App.tsx` |
-| `SCOPE_PREFIX` (`cartography.mjs`) | scopes declared as a nested `<Route path="c/:clientId">` |
-| `componentFacts` (`cartography.mjs`) | pages under `src/pages/` or `src/components/`, ES import syntax |
-| `navFacts` (`cartography.mjs`) | an optional `src/lib/nav-registry.ts` for groups and labels |
+| `routeTokens` (`map.mjs`) | React Router JSX — `<Route>` tags in `src/App.tsx` |
+| `SCOPE_PREFIX` (`map.mjs`) | scopes declared as a nested `<Route path="c/:clientId">` |
+| `componentFacts` (`map.mjs`) | pages under `src/pages/` or `src/components/`, ES import syntax |
+| `navFacts` (`map.mjs`) | an optional `src/lib/nav-registry.ts` for groups and labels |
 | `surfaceResourceEdges` (`lib/resource-edges.js`) | hooks imported as `@/hooks/x`, exported `export function` (not an arrow const), and the three read/write patterns named above |
 
 Everything downstream — the two-table split, the `owns:` join, the drift check — is stack-agnostic.
@@ -262,7 +307,7 @@ every screen under `personal`. `surfaceResourceEdges` degrades to empty `reads`/
 repo whose hooks use a different import alias or export shape — a real gap the ledger states,
 never a crash.
 
-**No single file is required.** The two extractors are independent: a repo with no React Router
+**No single file is required.** The two halves are independent: a repo with no React Router
 still has a data layer, and a repo with no migrations still has screens. A source this repo does
 not have is reported as `·` and the other half runs anyway. The tool fails only when *nothing at
 all* was extracted and no map is already committed — a stack it cannot read — because writing "no
