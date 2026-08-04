@@ -21,10 +21,16 @@ const roots = [];
 
 after(() => roots.forEach((r) => rmSync(r, { recursive: true, force: true })));
 
-/** A fixture repo: an App.tsx plus any page files it names. */
-function repo(appBody, pages = {}) {
+/** An empty checkout: no router, no data layer, nothing this tool reads. */
+function bare() {
   const root = mkdtempSync(join(tmpdir(), "carto-"));
   roots.push(root);
+  return root;
+}
+
+/** A fixture repo: an App.tsx plus any page files it names. */
+function repo(appBody, pages = {}) {
+  const root = bare();
   mkdirSync(join(root, "src"), { recursive: true });
   writeFileSync(join(root, "src/App.tsx"), `<Routes>\n${appBody}\n</Routes>\n`);
   for (const [name, body] of Object.entries(pages)) {
@@ -50,6 +56,8 @@ const rows = (root, table = "surfaces") => {
       .map((f) => [f.replace(/\.md$/, ""), readFrontmatter(readFileSync(join(dir, f), "utf8"))]),
   );
 };
+const LEDGER_PATH = "data/_views/blind-spots.md";
+const ledgerOf = (root) => readFileSync(join(root, LEDGER_PATH), "utf8");
 
 describe("frontmatter", () => {
   test("reads a block-style list, not just flow style", () => {
@@ -634,5 +642,121 @@ describe("the owns join", () => {
     const r = run(withFeature('owns: ["src/pages/Deleted.tsx"]'), "check");
     assert.match(r.out, /owns nothing/);
     assert.equal(r.code, 1, "a feature pointing at deleted code must fail the gate");
+  });
+});
+
+describe("independent extractors", () => {
+  test("extracts the data layer from a repo with no React Router", () => {
+    // `extractRoutes` threw on a missing src/App.tsx, and that aborted the run before resources
+    // were touched at all. A monorepo with 13 migrations and a dozen edge functions produced no
+    // map whatsoever — not a partial one, not a gap report, just `✗ no src/App.tsx`.
+    const root = bare();
+    mkdirSync(join(root, "supabase/migrations"), { recursive: true });
+    writeFileSync(
+      join(root, "supabase/migrations/0001.sql"),
+      'ALTER TABLE public.jobs ENABLE ROW LEVEL SECURITY;\nCREATE POLICY "p" ON public.jobs FOR SELECT USING (true);\n',
+    );
+    const r = run(root);
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(rows(root, "resources").jobs?.rls, ["select"], "no router cost the whole data layer");
+    assert.match(r.out, /unread \(surfaces\)\s+src\/App\.tsx/, "the absent router must be stated, not silent");
+    assert.equal(existsSync(join(root, "data/surfaces")), false, "materialised an empty surfaces table");
+  });
+
+  test("extracts screens from a repo with no data layer, and states what it could not read", () => {
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    const r = run(root);
+    assert.equal(r.code, 0, r.out);
+    assert.ok(rows(root).alpha, "no data layer cost the screens");
+    assert.match(r.out, /unread \(resources\).*supabase\/migrations/, "a missing source must be reported");
+  });
+
+  test("fails rather than writing an empty map when nothing at all is extractable", () => {
+    // Surviving one missing source must not become surviving all of them: "no screens, no tables"
+    // is a confident, wrong fact, and a committed empty map is worse than no map.
+    const r = run(bare());
+    assert.equal(r.code, 1);
+    assert.match(r.out, /no extractable source/);
+  });
+
+  test("refuses to wipe committed surfaces when the router file disappears", () => {
+    // The per-table emptiness guard has to survive the source going missing, not just the parser
+    // failing to understand it — otherwise making absence survivable makes deletion silent.
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    run(root);
+    assert.equal(Object.keys(rows(root)).length, 1);
+    rmSync(join(root, "src/App.tsx"));
+    const second = run(root);
+    assert.equal(second.code, 1);
+    assert.match(second.out, /refusing to empty the table/);
+    assert.match(second.out, /Source\(s\) not found: src\/App\.tsx/);
+    assert.equal(Object.keys(rows(root)).length, 1, "rows must survive a vanished source");
+  });
+});
+
+describe("the blind-spots ledger", () => {
+  test("check verifies the ledger it writes", () => {
+    // `diffTable` covered surfaces and resources; the ledger was written by `sync` and verified by
+    // nothing. An adversarial reviewer hand-edited the committed copy to read `99 / 99` and the
+    // gate CI runs exited 0 — so "nothing you write in data/ can move a number here" was true of
+    // sync and false of the only command anyone enforces.
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    run(root);
+    assert.equal(run(root, "check").code, 0, "a freshly synced ledger must pass");
+    const p = join(root, LEDGER_PATH);
+    writeFileSync(p, readFileSync(p, "utf8").replace(/\d+ \/ \d+/, "99 / 99"));
+    const r = run(root, "check");
+    assert.equal(r.code, 1, "a hand-edited ledger passed the gate");
+    assert.match(r.out, /changed ledger/);
+    assert.match(r.out, /stale fact/, "a wrong number is drift, not a coverage gap");
+  });
+
+  test("a missing ledger is drift too", () => {
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    run(root);
+    rmSync(join(root, LEDGER_PATH));
+    const r = run(root, "check");
+    assert.equal(r.code, 1);
+    assert.match(r.out, /new ledger/);
+  });
+
+  test("compares screens with screens, not screens with route tags", () => {
+    // The fraction was unique screen components over `<Route` tokens: two units, and a denominator
+    // no extractor could ever reach. A scope resolver and a `<Navigate>` are route tags and neither
+    // is another screen, so 42 / 104 read as permanent blindness where there was none — and hid
+    // the finding that matters, a routed component that produced no row.
+    const root = repo(
+      `<Route path="c/:clientId" element={<ClientScopeResolver />}>\n` +
+        `  <Route path="rocks" element={<Rocks />} />\n` +
+        `</Route>\n` +
+        `<Route path="rocks" element={<Rocks />} />\n` +
+        `<Route path="old" element={<Navigate to="/rocks" />} />\n` +
+        `<Route path="*" element={<NotFound />} />`,
+      { Rocks: "", NotFound: "" },
+    );
+    run(root);
+    // Five route tags, two screens. Both sides of the fraction are screens now.
+    assert.match(ledgerOf(root), /screens routed in src\/App\.tsx\s+2 \/ 2\s/);
+  });
+
+  test("counts resources carrying a scope, not resources carrying a declaration", () => {
+    // The label said "declared scope" and the numerator counted declaredness. A resource that
+    // declares its rule through a helper call the parser cannot read reports `scope: unknown`;
+    // counting it as seen hid the one blind spot this row exists to show.
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    mkdirSync(join(root, "src/lib"), { recursive: true });
+    writeFileSync(join(root, "src/lib/content.ts"), 'export const TABLES = {\n  P: "P",\n  Q: "Q",\n}\n');
+    writeFileSync(
+      join(root, "src/lib/resource-registry.ts"),
+      `const R = [\n` +
+        `defineResource({ name: TABLES.P, backing: "jsonb", scope: "none" }),\n` +
+        `defineResource({ name: TABLES.Q, backing: "jsonb", scope: ownerScope("Q") }),\n` +
+        `];\n`,
+    );
+    run(root);
+    const r = rows(root, "resources");
+    assert.equal(r.q.declared, "resource-registry.ts", "fixture no longer exercises the case");
+    assert.equal(r.q.scope, "unknown", "fixture no longer exercises the case");
+    assert.match(ledgerOf(root), /resources with a declared scope\s+1 \/ 2\s+1 declare a rule the parser cannot read/);
   });
 });

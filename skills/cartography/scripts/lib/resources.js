@@ -69,6 +69,31 @@ const stripSql = (s) => stripLine(s, "--");
 
 /** `export const TABLES = { PEOPLE: "People", ... }` — the legacy jsonb table names. */
 export const LEGACY_TABLE_FILES = ["src/lib/content.ts", "src/lib/airtable.ts"];
+/** The generated Supabase types — the typed half of the data plane. */
+export const TYPES_FILE = "src/integrations/supabase/types.ts";
+/** The hand-written registry: the one place a human wrote down what each resource is. */
+export const REGISTRY_FILE = "src/lib/resource-registry.ts";
+/** App code, scanned for `.from("x")` and `TABLES.KEY` references. */
+export const SRC_DIR = "src";
+export const MIGRATIONS_DIR = "supabase/migrations";
+export const FUNCTIONS_DIR = "supabase/functions";
+
+/**
+ * Every place this module reads a table name from, as groups of alternatives — a group is readable
+ * if any path in it exists. Named here so the caller can report an absent source instead of
+ * silently extracting nothing, and so the list cannot drift from the readers below: each function
+ * uses the same constant.
+ *
+ * This is existence, not inference. It answers "did I have anything to read", never "what is in it".
+ */
+export const RESOURCE_SOURCES = [
+  LEGACY_TABLE_FILES,
+  [TYPES_FILE],
+  [REGISTRY_FILE],
+  [SRC_DIR],
+  [MIGRATIONS_DIR],
+  [FUNCTIONS_DIR],
+];
 
 export function legacyTables(root) {
   // The file gets renamed — this one went `airtable.ts` -> `content.ts` and the map silently lost
@@ -86,7 +111,7 @@ export function legacyTables(root) {
 
 /** Table names in the generated Supabase types — the typed half of the data plane. */
 export function typedTables(root) {
-  const p = join(root, "src/integrations/supabase/types.ts");
+  const p = join(root, TYPES_FILE);
   if (!existsSync(p)) return [];
   const src = readFileSync(p, "utf8");
   const start = src.indexOf("    Tables: {");
@@ -117,7 +142,7 @@ function bracedAfter(text, key) {
 }
 
 export function declaredResources(root, tables) {
-  const p = join(root, "src/lib/resource-registry.ts");
+  const p = join(root, REGISTRY_FILE);
   if (!existsSync(p)) return [];
   const src = stripJs(readFileSync(p, "utf8"));
   const out = [];
@@ -187,7 +212,7 @@ export function tableRefs(dir, tables, { label = (f) => f } = {}) {
  * left for the verification pass to confirm.
  */
 export function rlsFromMigrations(root) {
-  const dir = join(root, "supabase/migrations");
+  const dir = join(root, MIGRATIONS_DIR);
   if (!existsSync(dir)) return {};
   const out = {};
   for (const file of readdirSync(dir).sort()) {
@@ -289,7 +314,7 @@ export function sqlStatements(sql) {
 
 /** Edge function names, and which of them bypass JWT verification. */
 export function edgeFunctions(root) {
-  const dir = join(root, "supabase/functions");
+  const dir = join(root, FUNCTIONS_DIR);
   if (!existsSync(dir)) return { names: [], noJwt: [] };
   const names = readdirSync(dir, { withFileTypes: true })
     .filter((e) => e.isDirectory() && !e.name.startsWith("_"))
@@ -320,8 +345,8 @@ export function extractResources(root) {
   const typed = typedTables(root);
   const declared = declaredResources(root, tables);
   const declaredBy = new Map(declared.map((d) => [d.name, d]));
-  const appHits = tableRefs(join(root, "src"), tables);
-  const fnDir = join(root, "supabase/functions");
+  const appHits = tableRefs(join(root, SRC_DIR), tables);
+  const fnDir = join(root, FUNCTIONS_DIR);
   const fnHits = existsSync(fnDir)
     ? tableRefs(fnDir, tables, {
         // `_shared/` is helper modules rather than a function, so it is an imprecise consumer

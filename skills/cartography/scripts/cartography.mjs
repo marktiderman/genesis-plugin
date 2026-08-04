@@ -23,7 +23,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import { basename, join, relative, resolve } from "node:path";
 
 import { readFrontmatter, yamlList, yamlScalar } from "./lib/frontmatter.js";
-import { edgeFunctions, extractResources, typedTables } from "./lib/resources.js";
+import { RESOURCE_SOURCES, edgeFunctions, extractResources, typedTables } from "./lib/resources.js";
 
 const HELP = `cartography — map a codebase into gitdata rows
 
@@ -31,10 +31,13 @@ const HELP = `cartography — map a codebase into gitdata rows
   cartography sync  [--root <dir>]   re-extract surfaces, report what changed
   cartography check [--root <dir>]   report without writing; exit 1 on findings (CI, pre-push)
 
-Reads:  <root>/src/App.tsx, <root>/src/**, <root>/src/lib/nav-registry.ts (optional)
+Reads:  <root>/src/App.tsx (surfaces), <root>/src/**, <root>/supabase/** (resources),
+        <root>/src/lib/nav-registry.ts (optional)
+        Every source is optional and an absent one is reported, not fatal — the surface and
+        resource extractors are independent. Only an entirely unreadable repo fails.
 Writes: <root>/data/{surfaces,resources}/*.md, <root>/data/_views/blind-spots.md
         <root>/data/features/_inventory.md — on \`init\` only, and only if absent
-Never writes a feature row.
+Never writes a feature row. \`check\` verifies every file it writes, ledger included.
 `;
 
 // ── tiny helpers ────────────────────────────────────────────────────────────────
@@ -141,6 +144,9 @@ const matchesAny = (path, globs) =>
   globs.flatMap(expandBraces).some((g) => globToRe(g).test(path));
 
 // ── extraction ──────────────────────────────────────────────────────────────────
+/** The only file the surface extractor reads routes from. Its absence is the surface blind spot. */
+const APP_FILE = "src/App.tsx";
+
 /**
  * URL prefix a scope resolver claims: `<Route path="c/:clientId">` opens the client scope.
  *
@@ -206,17 +212,54 @@ function braced(text, open) {
 }
 
 /**
+ * The screen behind one `<Route>` tag's element: the innermost component opened, or null when the
+ * element is absent or is chrome.
+ *
+ * The element may be wrapped in guards and providers (`<AdminGuard><AdminHome /></AdminGuard>`).
+ * The screen is the innermost component — the last one opened — since taking an outer one
+ * collapses every guarded page into a single row named after the guard.
+ *
+ * Named once because it is used twice: extraction turns it into rows, and the blind-spots ledger
+ * counts it as the denominator of "screens routed in src/App.tsx". A second copy of this rule
+ * would drift from the first, and a denominator that drifts from its numerator is exactly how that
+ * row came to divide unique screens by `<Route` tokens — two units in one fraction.
+ */
+function routeScreen(text) {
+  const at = text.indexOf("element={");
+  if (at === -1) return null; // a pathless grouping route, or the data-router `Component=` form
+  const opened = [...braced(text, at + "element=".length).matchAll(/<(\w+)/g)].map((m) => m[1]);
+  const component = opened.at(-1);
+  return component && !NOT_A_SCREEN.test(component) ? component : null;
+}
+
+/** The router file, comments blanked — or null when this repo has no React Router to read. */
+function routerSource(root) {
+  const p = join(root, APP_FILE);
+  // A commented-out route is not a route, and a route-shaped string is not a route either.
+  return existsSync(p) ? stripComments(readFileSync(p, "utf8")) : null;
+}
+
+/** Every distinct non-chrome component the router mounts, whether or not it became a row. */
+function routedScreens(root) {
+  const src = routerSource(root);
+  if (src === null) return [];
+  return uniq(routeTokens(src).filter((t) => !t.close).map((t) => routeScreen(t.text)).filter(Boolean));
+}
+
+/**
  * A screen's scope is the resolver it is nested inside, tracked on a stack of open routes.
  *
  * Slicing the file positionally instead — from one resolver to the next — put every route written
  * after the last resolver inside it. That is how the app-wide 404 came to be recorded as a product
  * screen: a fact stated confidently and wrong, which is worse in a generated table than a gap.
+ *
+ * A repo with no router extracts no routes and says so. It does NOT abort: it used to throw here,
+ * which killed the resource extractor too — one monorepo with 13 migrations and a dozen edge
+ * functions produced no map at all because it routes from files instead of from JSX.
  */
 function extractRoutes(root) {
-  const appPath = join(root, "src/App.tsx");
-  if (!existsSync(appPath)) throw new Error(`no src/App.tsx under ${root}`);
-  // A commented-out route is not a route, and a route-shaped string is not a route either.
-  const src = stripComments(readFileSync(appPath, "utf8"));
+  const src = routerSource(root);
+  if (src === null) return [];
   const found = [];
   const open = []; // one entry per unclosed <Route>: the scope it opens, or null
   for (const t of routeTokens(src)) {
@@ -233,14 +276,8 @@ function extractRoutes(root) {
     const scope = open.findLast((s) => s !== null) ?? "personal";
     if (!t.selfClosing) open.push(opens);
 
-    const at = t.text.indexOf("element={");
-    if (at === -1) continue; // a pathless grouping route, or the data-router `Component=` form
-    // The element may be wrapped in guards and providers (`<AdminGuard><AdminHome /></AdminGuard>`).
-    // The screen is the innermost component — the last one opened — since taking an outer one
-    // collapses every guarded page into a single row named after the guard.
-    const opened = [...braced(t.text, at + "element=".length).matchAll(/<(\w+)/g)].map((m) => m[1]);
-    const component = opened.at(-1);
-    if (!component || NOT_A_SCREEN.test(component)) continue;
+    const component = routeScreen(t.text);
+    if (!component) continue;
     const path = (t.text.match(/\bpath="([^"]*)"/) || [])[1];
     if (path === undefined && !/\bindex\b/.test(t.text)) continue;
     found.push({ scope, path: (path ?? "").replace(/^\//, ""), component });
@@ -529,6 +566,30 @@ function joinFeatures(surfaces, features) {
   }));
 }
 
+/**
+ * Where each extractor reads from, as groups of alternatives: a group is readable if any path in
+ * it exists.
+ *
+ * The two extractors are independent. A repo with no React Router still has a data layer; a repo
+ * with no migrations still has screens. So a missing source is a **stated absence** — printed,
+ * survivable, and never a reason to take the other extractor down. `extractRoutes` used to throw
+ * on a missing `src/App.tsx`, which aborted the run before resources were touched at all.
+ *
+ * Every source missing is different, and that one does fail: nothing here is an app this tool can
+ * read, and writing an empty map for it would state "no screens, no tables" as a fact.
+ */
+const SOURCES = { surfaces: [[APP_FILE]], resources: RESOURCE_SOURCES };
+
+/** For each table, the source groups that are not on disk. Existence only, never content. */
+function missingSources(root) {
+  return Object.fromEntries(
+    Object.entries(SOURCES).map(([table, groups]) => [
+      table,
+      groups.filter((g) => !g.some((p) => existsSync(join(root, p)))).map((g) => g.join(" | ")),
+    ]),
+  );
+}
+
 function report(surfaces, features) {
   const unclaimed = surfaces.filter((s) => s.claimedBy.length === 0);
   // A feature owning only code cartography does not extract (an edge function, a shared hook) is
@@ -593,6 +654,26 @@ function diffTable(root, table, rows, serialize) {
   return { added: added.sort(), removed: removed.sort(), changed: changed.sort() };
 }
 
+const LEDGER = "data/_views/blind-spots.md";
+
+/**
+ * The ledger is generated output too, so `check` compares it the same way it compares a row.
+ *
+ * It did not, for a while: `sync` wrote it and nothing verified it. An adversarial reviewer edited
+ * the committed copy to read `typed tables on the map 99 / 99` and the gate CI runs exited 0. The
+ * file's own claim — that nothing you write in `data/` can move a number in it — was then true of
+ * `sync` and false of the only command anyone enforces, which makes the anti-gaming property a
+ * decoration rather than a structure. A hand-edited number is a stale fact, and stale facts fail.
+ */
+function diffLedger(root, expected) {
+  const p = join(root, LEDGER);
+  const before = existsSync(p) ? readFileSync(p, "utf8") : null;
+  if (before === expected) return { added: [], removed: [], changed: [] };
+  return before === null
+    ? { added: [LEDGER], removed: [], changed: [] }
+    : { added: [], removed: [], changed: [LEDGER] };
+}
+
 /**
  * Drift and coverage are different findings and only one of them is a failure.
  *
@@ -602,10 +683,14 @@ function diffTable(root, table, rows, serialize) {
  * installed, and a check nobody can turn green is a check that gets removed. It is protected
  * instead by `claimed_by` living in the rows, where losing it shows up as drift.
  */
-function printReport(diffs, { unclaimed, dead }, surfaces, resources) {
+function printReport(diffs, { unclaimed, dead }, surfaces, resources, missing) {
   const line = (mark, label, items) =>
     items.length && console.log(`  ${mark} ${label.padEnd(22)} ${items.join(", ")}`);
   console.log(`  ${surfaces.length} surface(s), ${resources.length} resource(s) extracted`);
+  // What each extractor could not read. A gap prints; it never fails. Silence here used to mean
+  // "this repo has no data layer" and "this repo has no screens" indistinguishably from "the file
+  // those facts live in is not where this tool looks".
+  for (const [table, absent] of Object.entries(missing)) line("·", `unread (${table})`, absent);
   let drift = dead.length;
   for (const [table, d] of Object.entries(diffs)) {
     line("+", `new ${table}`, d.added);
@@ -628,24 +713,51 @@ function printReport(diffs, { unclaimed, dead }, surfaces, resources) {
  * a perfect trace while blind to an entire layer, which is exactly the state this app was in.
  */
 function blindSpots(root, surfaces, resources) {
-  const src = existsSync(join(root, "src/App.tsx")) ? readFileSync(join(root, "src/App.tsx"), "utf8") : "";
-  const routeCount = (stripComments(src).match(/<Route\b/g) ?? []).length;
+  // Both sides of this fraction are screens. It used to be unique screen components over `<Route`
+  // tokens — two units in one fraction, with a denominator no extractor could ever reach: 104
+  // route tags resolve to 42 screens because `<Navigate>`s, legacy redirects and the same page
+  // mounted in five scopes are all route tags and none of them is another screen. A ratio whose
+  // ceiling is unreachable reports permanent blindness where there is none, and hides the real
+  // miss — a routed component that produced no row — inside the noise.
+  const routed = routedScreens(root);
+  const onSurfaces = new Set(surfaces.map((s) => s.component));
   const typed = typedTables(root);
   const { names: fns } = edgeFunctions(root);
   const onMap = new Set(resources.map((r) => r.name));
+  // `scope: unknown` on a resource that *does* declare one — through a helper call the parser
+  // cannot read — is the blind spot this row exists to show, so it is counted as a miss.
+  const scopeUnread = resources.filter((r) => r.declared !== "undeclared" && r.scope === "unknown").length;
   const rows = [
-    ["routes declared in src/App.tsx", surfaces.length, routeCount, "many routes share a screen; a gap here is redirects and layouts, not misses"],
+    [
+      "screens routed in src/App.tsx",
+      routed.filter((c) => onSurfaces.has(c)).length,
+      routed.length,
+      routed.length ? "a gap is a routed component that produced no row" : `no ${APP_FILE} — no router to read`,
+    ],
     ["typed tables on the map", typed.filter((t) => onMap.has(t)).length, typed.length, ""],
     ["edge functions on the map", fns.filter((f) => resources.some((r) => r.used_by.includes(f))).length, fns.length, "a function touching no table cannot appear"],
     ["surfaces with a resource edge", surfaces.filter((s) => (s.reads?.length ?? 0) + (s.writes?.length ?? 0) > 0).length, surfaces.length, "not extracted yet"],
-    ["resources with a declared scope", resources.filter((r) => r.declared !== "undeclared").length, resources.length, ""],
+    // Counts what the label says: rows carrying an actual scope value. The old numerator counted
+    // *declaredness* — `r.declared !== "undeclared"` — under a label about scope, which read 35/82
+    // while only ~20 rows named a scope. Relabelling it to "declared" instead would have been the
+    // cheaper fix and the dishonest one: it answers a friendlier question, and the resources whose
+    // scope rule the parser cannot read would vanish from the ledger entirely, which is precisely
+    // the blind spot a blind-spots ledger is for.
+    [
+      "resources with a declared scope",
+      resources.filter((r) => r.scope !== "unknown").length,
+      resources.length,
+      scopeUnread ? `${scopeUnread} declare a rule the parser cannot read` : "",
+    ],
   ];
   const width = Math.max(...rows.map(([label]) => label.length));
   return `# Blind spots — what the extractor cannot see
 
-**Not a score, and not a target.** Every denominator below is counted outside the map: routes in
-the router, tables in the generated types, functions on disk. Nothing you write in \`data/\` can
-move a single number here. The only way to move one is to teach the extractor to see more.
+**Not a score, and not a target.** Every denominator below is counted outside the map: screens in
+the router, tables in the generated types, functions on disk. Both sides of each fraction are the
+same unit, so the ceiling is reachable. Nothing you write in \`data/\` can move a single number
+here — \`cartography check\` recomputes this file and fails on any difference, so editing it is
+drift, not improvement. The only way to move a number is to teach the extractor to see more.
 
 Expect these to get *worse* when a new extractor lands. That is the extractor working.
 
@@ -697,39 +809,60 @@ try {
     console.log(HELP);
     process.exit(command ? 1 : 0);
   }
+  const missing = missingSources(root);
+  // Every source of every table absent is not a stack this tool reads. Writing "no screens, no
+  // tables" for it would be a confident, wrong fact — the failure mode the whole map avoids.
+  if (Object.entries(SOURCES).every(([table, groups]) => missing[table].length === groups.length)) {
+    throw new Error(
+      `no extractable source under ${root} — looked for ` +
+        `${Object.values(SOURCES).flat().map((g) => g.join(" | ")).join(", ")}.\n` +
+        `  Nothing here is a codebase this extractor reads; refusing to write an empty map.`,
+    );
+  }
   const features = readFeatures(root);
+  // The two extractors are independent: neither absence takes the other down.
   const surfaces = joinFeatures(assertUniqueIds(extractSurfaces(root)), features);
   const resources = assertUniqueIds(extractResources(root), "resource");
+  const ledger = blindSpots(root, surfaces, resources);
   const diffs = {
     surfaces: diffTable(root, "surfaces", surfaces, surfaceRow),
     resources: diffTable(root, "resources", resources, resourceRow),
+    // Generated output is generated output. The ledger is checked, not just written.
+    ledger: diffLedger(root, ledger),
   };
   const r = report(surfaces, features);
 
   if (command === "check") {
-    const { drift, coverage } = printReport(diffs, r, surfaces, resources);
+    const { drift, coverage } = printReport(diffs, r, surfaces, resources, missing);
     if (drift > 0) console.log(`\n  ${drift} stale fact(s) — run \`cartography sync\` and commit.`);
     else if (coverage > 0) console.log(`\n  Map is current. ${coverage} screen(s) await a job.`);
     process.exit(drift > 0 ? 1 : 0);
   }
 
-  // Refuse to empty a populated table. A router refactor or a moved registry looks exactly like
-  // "there is nothing here", and wiping the map on that reading loses more than it reports.
-  for (const [table, rows] of [["surfaces", surfaces], ["resources", resources]]) {
+  // Refuse to empty a populated table. A router refactor, a moved registry, or a source this
+  // extractor can no longer find looks exactly like "there is nothing here", and wiping the map on
+  // that reading loses more than it reports. Per table, so a repo that has one and not the other
+  // keeps the one it has.
+  for (const [table, rows, serialize] of [
+    ["surfaces", surfaces, surfaceRow],
+    ["resources", resources, resourceRow],
+  ]) {
     const existing = committedRows(root, table).size;
     if (rows.length === 0 && existing > 0) {
       throw new Error(
         `extracted 0 ${table} but ${existing} row(s) are committed — refusing to empty the table.\n` +
-          `  The extractor no longer understands its sources. Fix it, or delete data/${table}/\n` +
-          `  deliberately.`,
+          `  ${missing[table].length ? `Source(s) not found: ${missing[table].join(", ")}.` : "The extractor no longer understands its sources."}\n` +
+          `  Fix it, or delete data/${table}/ deliberately.`,
       );
     }
+    // A table whose every source is absent gets no empty directory: the absence is reported, not
+    // materialised as a table that claims this repo has no screens.
+    if (missing[table].length === SOURCES[table].length) continue;
+    writeTable(root, table, rows, serialize);
   }
-  writeTable(root, "surfaces", surfaces, surfaceRow);
-  writeTable(root, "resources", resources, resourceRow);
   mkdirSync(join(root, "data/_views"), { recursive: true });
-  writeFileSync(join(root, "data/_views/blind-spots.md"), blindSpots(root, surfaces, resources), "utf8");
-  printReport(diffs, r, surfaces, resources);
+  writeFileSync(join(root, LEDGER), ledger, "utf8");
+  printReport(diffs, r, surfaces, resources, missing);
   if (command === "init") {
     const proposed = proposeInventory(root, surfaces);
     console.log(
