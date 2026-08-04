@@ -1,0 +1,30 @@
+skills/map/SKILL.md
+  s_038a22b897b50a::t_d74f544273c067 240-241
+  s_038a22b897b50a::t_490b45a7d423a0 256-293
+skills/map/package.json
+  s_038a22b897b50a::t_ced5b2f098bb57 3
+  s_038a22b897b50a::t_9651df469bc7f7 1-2,4-40
+skills/map/scripts/map.mjs
+  s_038a22b897b50a::t_fd038d7a68b218 42-46
+  s_038a22b897b50a::t_feae5602a96e4b 958-975
+.github/workflows/publish-map.yml
+  s_038a22b897b50a::t_2b30a8709461db 1-96
+README.md
+  s_038a22b897b50a::t_289d6c7fce9093 29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "385a2b6619360629c2ea4b58027e02ff296a94c4",
+  "prompts": {},
+  "sessions": {
+    "s_038a22b897b50a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dc8c7472-fb8d-43b2-9409-c0c541ccd15d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Mark Tiderman <marktiderman@users.noreply.github.com>"
+    }
+  }
+}
