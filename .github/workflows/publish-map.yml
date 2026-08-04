@@ -1,0 +1,96 @@
+name: Publish map
+
+# Every change that lands in skills/map/ on main becomes a new npm version automatically — no one
+# ever edits a version number by hand, here or in a consumer. That is the whole point: a consumer
+# that depends on @marktiderman/genesis-map@latest gets an improvement the moment it merges here,
+# with zero action in the consumer's repo (see skills/map/README section "Distribution").
+#
+# The version itself is computed from what the registry currently holds, not from package.json's
+# committed value — package.json's version field is therefore never a source of truth and this
+# workflow never commits a bump back to the repo. That keeps "what version is next" a fact this
+# workflow re-derives every run, not a piece of state that can drift from what actually got
+# published (a committed version that lagged a manual publish, or the reverse, is how skew like
+# that usually starts).
+#
+# Auth: NPM_TOKEN (an automation token on the marktiderman account) rather than npm's newer
+# Trusted Publishing (OIDC, no stored secret at all — see @marktiderman/gitdata for a package
+# already configured that way). Trusted Publishing has to be turned on per-package from
+# npmjs.com's web UI after the package exists, which this run could not do non-interactively.
+# Recommended follow-up: configure it for @marktiderman/genesis-map the same way, then drop
+# NPM_TOKEN. --provenance below still attaches a signed SLSA build attestation either way —
+# that part does not depend on which auth method is used.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "skills/map/**"
+      - ".github/workflows/publish-map.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write # required for `npm publish --provenance`
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: skills/map
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          registry-url: "https://registry.npmjs.org"
+
+      # The tests this run must not break (see repo root: "Tests: node --test
+      # skills/map/scripts/test/*.test.js") — run from repo root since that is the path the
+      # command documents, and this job's working-directory default is skills/map for every
+      # other step.
+      - name: Run map's test suite
+        working-directory: .
+        run: node --test skills/map/scripts/test/*.test.js
+
+      - name: Compute next version
+        id: version
+        run: |
+          set -euo pipefail
+          NAME=$(node -p "require('./package.json').name")
+          # 404 (package or version not found) is the expected case on a first-ever publish, or
+          # this specific auth/environment never having reached the registry before — not an
+          # error. Anything else npm prints goes to stderr and is swallowed on purpose here: a
+          # transient registry hiccup should not stop a publish that would otherwise succeed;
+          # `npm publish` itself is the real gate, and it fails loudly if something is actually
+          # wrong.
+          CURRENT=$(npm view "$NAME" version 2>/dev/null || echo "")
+          if [ -z "$CURRENT" ]; then
+            NEXT="0.1.0"
+          else
+            NEXT=$(node -e "
+              const [maj, min, pat] = process.argv[1].split('.').map(Number);
+              console.log([maj, min, pat + 1].join('.'));
+            " "$CURRENT")
+          fi
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "Registry currently has: ${CURRENT:-<nothing published>} — publishing $NEXT"
+
+      - name: Set package version
+        run: npm version "${{ steps.version.outputs.next }}" --no-git-tag-version --allow-same-version
+
+      - name: Publish
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "### Published @marktiderman/genesis-map@${{ steps.version.outputs.next }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- source commit: \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- previous registry version: \`${{ steps.version.outputs.current || 'none' }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Verify: \`npm view @marktiderman/genesis-map@${{ steps.version.outputs.next }} gitHead\` should equal the commit above." >> "$GITHUB_STEP_SUMMARY"
