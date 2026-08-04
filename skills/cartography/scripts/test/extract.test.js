@@ -588,7 +588,7 @@ describe("resources", () => {
     // registry mentions the table.
     writeFileSync(join(root, "src/pages/Alpha.tsx"), "export default function Alpha(){}");
     run(root);
-    assert.equal(rows(root, "resources").people.reached_from_src, "false");
+    assert.equal(rows(root, "resources").people.reach, "none");
   });
 
   test("reconciles the sources into one row per resource", () => {
@@ -614,7 +614,7 @@ describe("resources", () => {
     assert.equal(ghost.rls_enabled, "true");
     assert.deepEqual(ghost.rls, ["select"]);
     assert.deepEqual(ghost.used_by, ["_shared", "send-sms"]);
-    assert.equal(ghost.reached_from_src, "false");
+    assert.equal(ghost.reach, "none", "reach is about src/ — an edge-function-only table is unreached there");
   });
 
   test("does not invent a table from words inside a policy name", () => {
@@ -631,7 +631,7 @@ describe("resources", () => {
     // of them as untouched by an app that reads them on nearly every screen.
     const root = dataRepo();
     run(root);
-    assert.equal(rows(root, "resources").people.reached_from_src, "true");
+    assert.equal(rows(root, "resources").people.reach, "feature");
   });
 
   test("counts a declared resource reached through the provider, not only through .from()", () => {
@@ -650,7 +650,7 @@ describe("resources", () => {
     );
     put("src/hooks/use-execution.ts", 'export const useTasks = () => useScopedResource<Task>("tasks", filters, {});\n');
     run(root);
-    assert.equal(rows(root, "resources").tasks.reached_from_src, "true");
+    assert.equal(rows(root, "resources").tasks.reach, "feature");
   });
 
   test("does not invent a resource from a string literal that no declaration names", () => {
@@ -662,6 +662,105 @@ describe("resources", () => {
     writeFileSync(join(root, "src/hooks/use-copy.ts"), 'export const label = t("invoices");\n');
     run(root);
     assert.equal(rows(root, "resources").invoices, undefined);
+  });
+});
+
+describe("reach ladder", () => {
+  /** A fixture whose only source is a registry declaring every synthetic name this suite uses —
+   * `defineResource` is enough to put a name in `names` (and, since these are all declared, in
+   * `addressed`) without needing a migration or a generated type just to seed the noun. */
+  const reachRepo = () => {
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    const put = (rel, text) => {
+      mkdirSync(join(root, rel, ".."), { recursive: true });
+      writeFileSync(join(root, rel), text, "utf8");
+    };
+    put(
+      "src/lib/resource-registry.ts",
+      [
+        "feature_widget",
+        "listed_widget",
+        "test_widget",
+        "none_widget",
+        "dual_widget",
+        "split_widget",
+        "tags",
+        "tasks",
+      ]
+        .map((n) => `defineResource({ name: "${n}", backing: "supabase", scope: "none" })`)
+        .join(",\n") + ";\n",
+    );
+    return { root, put };
+  };
+
+  test("reads `feature` from a recognized call in a non-test file", () => {
+    const { root, put } = reachRepo();
+    put("src/hooks/use-feature.ts", 'export const useFeatureWidget = () => supabase.from("feature_widget").select();\n');
+    run(root);
+    assert.equal(rows(root, "resources")["feature-widget"].reach, "feature");
+  });
+
+  test("reads `listed` from a bare literal in a non-test file that no recognized call reaches", () => {
+    // The admin data browser's own case: `ADMIN_TABLES` writes every table name down as a plain
+    // array element, and reads them back through `.from(table as string)` — a variable, not a
+    // literal, so no recognized call names them even though the app plainly lists them.
+    const { root, put } = reachRepo();
+    put("src/lib/admin-tables.ts", 'export const ADMIN_TABLES = ["listed_widget"];\n');
+    run(root);
+    assert.equal(rows(root, "resources")["listed-widget"].reach, "listed");
+  });
+
+  test("reads `test` when the name appears only inside test files", () => {
+    // The scope-middleware case: a call that exists to assert the resource is *denied* still
+    // names it, and a boolean `reached_from_src` could not tell that apart from a real reach.
+    const { root, put } = reachRepo();
+    put("src/hooks/use-test-widget.test.ts", 'const NAME = "test_widget";\n');
+    run(root);
+    assert.equal(rows(root, "resources")["test-widget"].reach, "test");
+  });
+
+  test("reads `none` when the name appears nowhere under src/", () => {
+    const { root } = reachRepo();
+    run(root);
+    assert.equal(rows(root, "resources")["none-widget"].reach, "none");
+  });
+
+  test("precedence: a table both listed and feature-reached is `feature`", () => {
+    const { root, put } = reachRepo();
+    put("src/hooks/use-dual.ts", 'export const useDual = () => supabase.from("dual_widget").select();\n');
+    put("src/lib/other-list.ts", 'export const OTHER_TABLES = ["dual_widget"];\n');
+    run(root);
+    assert.equal(rows(root, "resources")["dual-widget"].reach, "feature");
+  });
+
+  test("precedence: a table named in both a test and a non-test literal is `listed`, not `test`", () => {
+    const { root, put } = reachRepo();
+    put("src/lib/config-list.ts", 'export const CONFIG_TABLES = ["split_widget"];\n');
+    put("src/hooks/use-split.test.ts", 'const NAME = "split_widget";\n');
+    run(root);
+    assert.equal(rows(root, "resources")["split-widget"].reach, "listed");
+  });
+
+  test("does not match a bare literal as a substring of a longer identifier", () => {
+    // A table named `tags` must not match `"tags-input"`. Only the substring guard is under test
+    // here, so `tags` appears nowhere else — a false match reads `listed`, a correct one `none`.
+    const { root, put } = reachRepo();
+    put("src/components/TagsInput.tsx", 'export const INPUT_CLASS = "tags-input";\n');
+    run(root);
+    assert.equal(rows(root, "resources").tags.reach, "none", "\"tags-input\" was read as containing \"tags\"");
+  });
+
+  test("does not read a declared name passed to an unrecognized call as `feature`", () => {
+    // Reviewer finding on this branch: the addressed-call form used to match a declared name as
+    // the first argument to *any* call — `t("tasks")`, `console.log("tasks", x)` — because the
+    // regex checked only what followed the `(`, never the callee. That is not a resource read,
+    // and under this ladder a false `feature` is the worst place for it to land: `feature` is the
+    // rung the ledger counts. The literal is still there, so the correct reading is `listed`, not
+    // silence and not `feature`.
+    const { root, put } = reachRepo();
+    put("src/hooks/use-copy.ts", 'export const label = t("tasks");\nconsole.log("tasks", 1);\n');
+    run(root);
+    assert.equal(rows(root, "resources").tasks.reach, "listed");
   });
 });
 
@@ -942,7 +1041,7 @@ describe("the blind-spots ledger", () => {
     // the reader every denominator was counted outside the map, so the zero reads as a fact.
     const absent = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
     run(absent);
-    assert.match(ledgerOf(absent), /typed tables reached from src\s+0 \/ 0\s+no src\/integrations\/supabase\/types\.ts/);
+    assert.match(ledgerOf(absent), /typed tables reached by a feature\s+0 \/ 0\s+no src\/integrations\/supabase\/types\.ts/);
 
     const unreadable = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
     mkdirSync(join(unreadable, "src/integrations/supabase"), { recursive: true });
@@ -951,7 +1050,7 @@ describe("the blind-spots ledger", () => {
       "export type Database = { public: { Tables: { profiles: { Row: {} }, widgets: { Row: {} } } } }\n",
     );
     run(unreadable);
-    assert.match(ledgerOf(unreadable), /typed tables reached from src\s+0 \/ 0\s+src\/integrations\/supabase\/types\.ts present but no/);
+    assert.match(ledgerOf(unreadable), /typed tables reached by a feature\s+0 \/ 0\s+src\/integrations\/supabase\/types\.ts present but no/);
   });
 
   test("refuses a repo that merely has a directory named src", () => {

@@ -104,7 +104,11 @@ export const RESOURCE_SOURCES = [
  * `[\s\S]`, so this still cannot be satisfied by unrelated code that merely also assigns an
  * object — the colon after `TABLES` is what makes it a type annotation and not a syntax error.
  */
-const TABLES_BLOCK = /export const TABLES(?:\s*:\s*[^=\n]+)?\s*=\s*\{([\s\S]*?)\n\}/;
+// `d` adds `.indices` so `resourceReach` can blank exactly this block's characters in a legacy
+// file without touching the rest of it — that file also carries the airtable-shim's real
+// `.from("content_records")` calls, so excluding the whole file the way the registry is excluded
+// hid a genuine `feature` reach behind the file's own declaration.
+const TABLES_BLOCK = /export const TABLES(?:\s*:\s*[^=\n]+)?\s*=\s*\{([\s\S]*?)\n\}/d;
 
 export function legacyTables(root) {
   // The file gets renamed — this one went `airtable.ts` -> `content.ts` and the map silently lost
@@ -219,28 +223,45 @@ export function declaredResources(root, tables) {
 }
 
 /**
+ * A callee name whose first argument plausibly *addresses* a resource, per the registry's own
+ * documented contract for the third form below (`name` is "exactly as `useResource(name)` / the
+ * router addresses it"): a `use*` hook, or one of the CRUD verbs a data provider exposes.
+ *
+ * The third form used to match a declared name as the first argument to *any* call —
+ * `t("tasks")`, `console.log("tasks", x)`, a test's `describe("tasks", ...)` — because the regex
+ * looked only at what followed the `(`, never at the name before it. That is strictly narrower
+ * than reach ever reported under the old boolean, so it was not a regression there, but it can
+ * mint a `feature` reach — now the strongest rung on the ladder below, and the one the ledger
+ * counts — from a translation call or a log line. Anchoring to a call name the registry's own
+ * contract already licenses reads the declaration instead of guessing at one; a name matched only
+ * by the old, unanchored shape now falls to `listed` (`resourceReach` below), never `feature`.
+ */
+const RESOURCE_CALL = String.raw`\b(?:use[A-Z]\w*|getList|getOne|getMany|create|update|delete)\s*(?:<[^<>]*>)?`;
+
+/**
  * Table references in a tree, mapped table -> the files that reach it.
  *
  * Three forms, because an app addresses its data through more than one seam: `.from("x")` for a
  * direct client call, `TABLES.KEY` for the legacy jsonb constants, and — for a resource the
- * registry has already declared by name — that name passed as a call's first argument, which is
- * how a resource reached through a data-provider switchboard is written (`useResource("tasks")`).
+ * registry has already declared by name — that name passed as a recognized call's first argument,
+ * which is how a resource reached through a data-provider switchboard is written
+ * (`useResource("tasks")`).
  *
  * Counting only `.from()` reported every legacy table as unreached from `src/` — 24 rows saying
  * the app never touches data it touches on nearly every screen — and, later, reported six of the
  * seven resources routed through the provider as reached by nothing, which is precisely the
  * "a table no screen reaches" finding this column exists to raise.
  *
- * The third form is bounded by `addressed`: only names a declaration already established as
- * resource names are looked for, so this can confirm a reach but can never invent a table out of
- * a string literal. It reads the declaration; it does not guess at one.
+ * The third form is bounded twice over: by `addressed`, so this can confirm a reach but can never
+ * invent a table out of a string literal, and by `RESOURCE_CALL`, so the call doing the
+ * addressing is one the registry's own contract actually describes.
  */
 export function tableRefs(dir, tables, { label = (f) => f, addressed = [] } = {}) {
   const hits = {};
   const byKey = Object.entries(tables);
   const addressedRe = addressed.map((name) => [
     name,
-    new RegExp(String.raw`\(\s*["']${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']\s*[,)]`),
+    new RegExp(String.raw`${RESOURCE_CALL}\(\s*["']${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']\s*[,)]`),
   ]);
   const walk = (d) => {
     let entries;
@@ -273,6 +294,129 @@ export function tableRefs(dir, tables, { label = (f) => f, addressed = [] } = {}
   };
   walk(dir);
   return hits;
+}
+
+/**
+ * Test files, by this repo's convention: `*.test.*`, `*.spec.*`, or anything under a
+ * `__tests__/` directory. `reach` needs this distinction and `used_by` does not — a function
+ * either touches a table or it does not, regardless of who calls it, but a call that exists only
+ * to assert a resource is *denied* is not evidence a feature reaches it.
+ */
+export function isTestFile(path) {
+  const norm = path.replace(/\\/g, "/");
+  return /\.(test|spec)\.[^./]+$/.test(norm) || /(?:^|\/)__tests__\//.test(norm);
+}
+
+/**
+ * How far `src/` reaches each candidate resource `name`, resolved into a four-value ladder in
+ * strict precedence order — `feature` beats `listed` beats `test` beats `none`:
+ *
+ *   1. `feature` — a recognized call (`.from("x")`, `TABLES.KEY`, or an addressed call's first
+ *      argument — the same three forms `tableRefs` reads) in a NON-TEST file under `src/`.
+ *   2. `listed`  — the name appears as a bare, exactly-quoted string literal in a NON-TEST file,
+ *      but no recognized call reaches it. Someone wrote the name down; nothing recognized calls it.
+ *   3. `test`    — the name appears (in any of the above forms) only inside test files.
+ *   4. `none`    — the name appears nowhere under `src/`.
+ *
+ * This is a separate pass from `tableRefs`/`used_by`, on purpose. `used_by` answers "which edge
+ * function touches this table" and rightly counts every file, test included. `reach` answers a
+ * different question — "did a feature name this, or only a test proving it's unreachable" — and
+ * conflating the two is exactly how a boolean `reached_from_src` came to read `"true"` for a
+ * resource whose only call anywhere is
+ * `scope-middleware.test.ts`'s `scoped.getList(TABLES.COACHES, {})`, written to assert that call
+ * is *denied*. A test proving a table is unreachable is not the table being reached.
+ *
+ * `listed` deliberately does not try to tell a config file's array of table names from an
+ * unrelated string that happens to match one — that would be a heuristic about a file's purpose,
+ * and "the literal appears, but no call I recognize uses it" is mechanically checkable without
+ * one. The registry is excluded wholesale — the same file `tableRefs` already excludes for the
+ * same documented reason: declaring a resource is not reading it. The legacy `TABLES = { KEY:
+ * "value" }` file gets the narrower version of that same treatment: only the declaration *block*
+ * is blanked before matching, not the whole file, because that file is also the airtable shim —
+ * it carries the real `.from("content_records")` calls that back every legacy CRUD operation.
+ * Excluding it wholesale, the first cut at this did, put every jsonb table's own `KEY: "Name"`
+ * entry out of reach of `listed` as intended, but took a genuine `feature` reach down with it.
+ */
+export function resourceReach(root, names, tables, { addressed = [] } = {}) {
+  const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const nameToKey = new Map(Object.entries(tables).map(([key, name]) => [name, key]));
+  const addressedSet = new Set(addressed);
+  const perName = names.map((name) => {
+    const esc = escape(name);
+    const key = nameToKey.get(name);
+    return {
+      name,
+      fromRe: new RegExp(String.raw`\.from\(\s*["']${esc}["']`),
+      keyRe: key ? new RegExp(String.raw`\bTABLES\.${key}\b`) : null,
+      callRe: addressedSet.has(name)
+        ? new RegExp(String.raw`${RESOURCE_CALL}\(\s*["']${esc}["']\s*[,)]`)
+        : null,
+      literalRe: new RegExp(String.raw`"${esc}"|'${esc}'`),
+    };
+  });
+
+  const state = new Map(names.map((n) => [n, { feature: false, listed: false, test: false }]));
+  const dir = join(root, SRC_DIR);
+  const declarationFiles = new Set(
+    [REGISTRY_FILE, REGISTRY_FILE.replace(/\.ts$/, ".test.ts")].map((rel) => join(root, rel)),
+  );
+  const legacyFiles = new Set(LEGACY_TABLE_FILES.map((rel) => join(root, rel)));
+  /** Blank just the `TABLES = {...}` block's characters (newlines kept), same idea as `stripLine`
+   * blanking a comment: everything else in the file still scans normally. */
+  const blankLegacyBlock = (src) => {
+    const m = TABLES_BLOCK.exec(src);
+    if (!m?.indices) return src;
+    const [start, end] = m.indices[1];
+    return src.slice(0, start) + src.slice(start, end).replace(/[^\n]/g, " ") + src.slice(end);
+  };
+
+  const walk = (d) => {
+    let entries;
+    try {
+      entries = readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const path = join(d, e.name);
+      if (e.isDirectory()) {
+        if (e.name !== "node_modules") walk(path);
+        continue;
+      }
+      if (!/\.(ts|tsx)$/.test(e.name)) continue;
+      if (declarationFiles.has(path)) continue;
+      const test = isTestFile(path);
+      const stripped = stripJs(readFileSync(path, "utf8"));
+      const src = legacyFiles.has(path) ? blankLegacyBlock(stripped) : stripped;
+      for (const { name, fromRe, keyRe, callRe, literalRe } of perName) {
+        const s = state.get(name);
+        // No early exit once `s.feature` is set: the ladder's precedence is decided once, in the
+        // final resolution below, from `feature`/`listed`/`test` together — not by which file a
+        // directory happens to read first. Skipping further files the moment `feature` was found
+        // left `listed` state order-dependent (true only if a listed-only file was read *before*
+        // the feature one), which made the final ternary's own precedence untestable: reverting
+        // it to check `listed` first passed or failed depending on `readdirSync` order, not on
+        // the code.
+        const feature = fromRe.test(src) || (keyRe?.test(src) ?? false) || (callRe?.test(src) ?? false);
+        const literal = literalRe.test(src);
+        if (test) {
+          if (feature || literal) s.test = true;
+        } else if (feature) {
+          s.feature = true;
+        } else if (literal) {
+          s.listed = true;
+        }
+      }
+    }
+  };
+  walk(dir);
+
+  return Object.fromEntries(
+    names.map((name) => {
+      const s = state.get(name);
+      return [name, s.feature ? "feature" : s.listed ? "listed" : s.test ? "test" : "none"];
+    }),
+  );
 }
 
 /**
@@ -496,9 +640,14 @@ export function extractResources(root) {
   const slugCounts = {};
   for (const name of names) slugCounts[slug(name)] = (slugCounts[slug(name)] ?? 0) + 1;
 
+  // A second pass over `src/`, once `names` is closed: `appHits` above exists to discover names
+  // (a `.from("x")` call can name a table nothing else does), while `reach` classifies the names
+  // already found — the two questions need different answers per file (test or not) that a single
+  // `table -> Set(files)` map does not carry.
+  const reach = resourceReach(root, names, tables, { addressed });
+
   return names.map((name) => {
     const d = declaredBy.get(name);
-    const inApp = appHits[name]?.size > 0;
     const usedBy = [...(fnHits[name] ?? [])].sort();
     // `migration` sits above `edge-only`/`orphan` because a `CREATE TABLE` in this repo's own
     // migrations is the strongest statement of where a table lives that a repo can make, and the
@@ -528,7 +677,7 @@ export function extractResources(root) {
       fields: d?.fields ?? [],
       rls: rls[name] ? [...new Set(rls[name].policies.values())].sort() : [],
       rls_enabled: rls[name] ? String(rls[name].enabled) : "unknown",
-      reached_from_src: String(Boolean(inApp)),
+      reach: reach[name],
       used_by: usedBy,
       claimed_by: [],
     };
