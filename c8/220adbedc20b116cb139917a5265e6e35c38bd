@@ -1,0 +1,27 @@
+.github/workflows/claude-code-review.yml
+  s_038a22b897b50a::t_204250dbff27a9 42-53
+skills/map/SKILL.md
+  s_038a22b897b50a::t_77b58409b8412a 125,133-160
+skills/map/scripts/lib/resources.js
+  s_038a22b897b50a::t_b7090a0f534b2e 110-114,239-243,248,252-267,273-275,282-284,323-445,667-672,704
+skills/map/scripts/map.mjs
+  s_038a22b897b50a::t_f857cfadcf86fa 551-552,565,834-840,846-847,850
+skills/map/scripts/test/extract.test.js
+  s_038a22b897b50a::t_91f2e266e5e69d 591,617,634,653,668-766,1231,1240
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "c8220adbedc20b116cb139917a5265e6e35c38bd",
+  "prompts": {},
+  "sessions": {
+    "s_038a22b897b50a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dc8c7472-fb8d-43b2-9409-c0c541ccd15d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Mark Tiderman <marktiderman@users.noreply.github.com>"
+    }
+  }
+}
