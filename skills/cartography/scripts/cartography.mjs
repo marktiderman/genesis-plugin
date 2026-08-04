@@ -544,8 +544,8 @@ claimed_by: ${yamlList(s.claimedBy)}
 /**
  * A resource row records each source separately rather than merging them into one "exists" flag.
  * The disagreements are the point: a table with RLS that no type file knows about and no screen
- * reaches is a finding, and it is only visible if `declared`, `rls_enabled` and `reached_from_src`
- * are allowed to contradict each other on the same row.
+ * reaches is a finding, and it is only visible if `declared`, `rls_enabled` and `reach` are
+ * allowed to contradict each other on the same row.
  */
 const resourceRow = (r) =>
   `---
@@ -558,7 +558,7 @@ scope: ${yamlScalar(r.scope)}
 debt: ${yamlScalar(r.debt)}
 rls_enabled: ${yamlScalar(r.rls_enabled)}
 rls: ${yamlList(r.rls)}
-reached_from_src: ${yamlScalar(r.reached_from_src)}
+reach: ${yamlScalar(r.reach)}
 used_by: ${yamlList(r.used_by)}
 fields: ${yamlList(r.fields)}
 claimed_by: ${yamlList(r.claimed_by)}
@@ -827,18 +827,23 @@ function blindSpots(root, surfaces, resources) {
     // (lib/resources.js), so every typed table becomes a row unconditionally — that numerator
     // could never read below its own denominator. A table added to the generated types and named
     // nowhere else (no migration, no registry entry, no `.from()`, no `TABLES` key) still read
-    // 58 / 58. `reached_from_src` is a fact the map does not guarantee: a typed table can sit
-    // unused in `src/`, reached only from an edge function or from nothing at all.
+    // 58 / 58. `reach` is a fact the map does not guarantee: a typed table can sit unused in
+    // `src/`, reached only from an edge function or from nothing at all.
+    // NOT `reach !== "none"` either: that would count a table whose only src/ evidence is
+    // `listed` (a bare literal nothing calls) or `test` (a call that exists to assert the
+    // resource is *denied*) as seen — the same unfalsifiable-ledger failure the old boolean
+    // field this row used to read (`reached_from_src`) already had, one column over. `feature` is
+    // the only rung a real screen produced.
     // A denominator of zero is three different facts, and this row stated only one of them. The
     // same conflation the router row above was fixed for: a repo with no `types.ts` and a repo
     // whose `types.ts` this parser cannot follow produced byte-identical output, and
     // `missingSources` is existence-only so the present-but-unreadable case printed no `·` either.
     [
-      "typed tables reached from src",
-      typed.filter((t) => resourceByName.get(t)?.reached_from_src === "true").length,
+      "typed tables reached by a feature",
+      typed.filter((t) => resourceByName.get(t)?.reach === "feature").length,
       typed.length,
       typed.length
-        ? "the rest are declared in the generated types but never named in a src/ `.from()` call"
+        ? "the rest are `listed` (a bare literal, no recognized call), reached only by a `test`, or `none`"
         : { absent: `no ${TYPES_FILE} — no generated types to read`, unreadable: `${TYPES_FILE} present but no \`Tables: {\` block the parser can read`, read: "the generated types declare no tables" }[typedTablesState(root)],
     ],
     ["edge functions on the map", fns.filter((f) => resources.some((r) => r.used_by.includes(f))).length, fns.length, "a function touching no table cannot appear"],
