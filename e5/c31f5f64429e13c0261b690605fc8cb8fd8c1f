@@ -1,0 +1,19 @@
+.github/workflows/publish-map.yml
+  s_038a22b897b50a::t_e2533784059296 24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "e5c31f5f64429e13c0261b690605fc8cb8fd8c1f",
+  "prompts": {},
+  "sessions": {
+    "s_038a22b897b50a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dc8c7472-fb8d-43b2-9409-c0c541ccd15d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Mark Tiderman <marktiderman@users.noreply.github.com>"
+    }
+  }
+}
