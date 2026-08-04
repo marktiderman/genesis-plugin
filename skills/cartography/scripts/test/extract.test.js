@@ -759,4 +759,29 @@ describe("the blind-spots ledger", () => {
     assert.equal(r.q.scope, "unknown", "fixture no longer exercises the case");
     assert.match(ledgerOf(root), /resources with a declared scope\s+1 \/ 2\s+1 declare a rule the parser cannot read/);
   });
+
+  test("does not say a router file is absent when it is present and unreadable", () => {
+    // The note was selected by "zero screens resolved", not by "the file is not there", so a repo
+    // whose App.tsx mounts screens through `createBrowserRouter` produced a note byte-identical to
+    // a repo with no App.tsx at all — and `missingSources` is existence-only, so no `·` corrected
+    // it. The one sentence about the surface layer was a checkable falsehood, at exit 0.
+    const root = bare();
+    mkdirSync(join(root, "src/pages"), { recursive: true });
+    mkdirSync(join(root, "supabase/migrations"), { recursive: true });
+    writeFileSync(join(root, "supabase/migrations/0001.sql"), "CREATE TABLE public.jobs (id uuid);\n");
+    writeFileSync(
+      join(root, "src/App.tsx"),
+      `import Home from "./pages/Home";\nconst router = createBrowserRouter([{ path: "/", Component: Home }]);\n`,
+    );
+    writeFileSync(join(root, "src/pages/Home.tsx"), "export default function Home(){return null}\n");
+    assert.equal(run(root).code, 0);
+    const ledger = ledgerOf(root);
+    assert.match(ledger, /screens routed in src\/App\.tsx\s+0 \/ 0\s+src\/App\.tsx present but no <Route/);
+    assert.doesNotMatch(ledger, /no src\/App\.tsx/, "the file it says is missing is on disk");
+
+    rmSync(join(root, "src/App.tsx"));
+    rmSync(join(root, "data"), { recursive: true });
+    run(root);
+    assert.match(ledgerOf(root), /screens routed in src\/App\.tsx\s+0 \/ 0\s+no src\/App\.tsx/);
+  });
 });
