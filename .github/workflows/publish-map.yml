@@ -21,9 +21,7 @@ name: Publish map
 # that part does not depend on which auth method is used.
 on:
   push:
-    # TEMP-TEST-TRIGGER: feat/publish-map-npm added here only to get one real run through
-    # GitHub's infrastructure before this PR merges; removed in the commit right after.
-    branches: [main, feat/publish-map-npm]
+    branches: [main]
     paths:
       - "skills/map/**"
       - ".github/workflows/publish-map.yml"
