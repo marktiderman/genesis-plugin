@@ -237,8 +237,8 @@ code, so it belongs in a pre-push hook and in CI. A new screen fails until it is
 whose globs match no file fails until the glob is fixed. A screen with no owner does not fail — it
 waits.
 
-A CI runner has no plugins, so `${CLAUDE_PLUGIN_ROOT}` is not there: point the build at a checkout
-of this repo, **pinned to a commit**, or a change to map breaks a build that did not change.
+A CI runner has no plugins, so `${CLAUDE_PLUGIN_ROOT}` is not there. Use the published package
+instead of a checkout — see **Distribution** below.
 
 **Flows, once a repo authors them.** `data/flows/` is a third, human-authored table — an ordered
 walk through surfaces that already exist, reaching an outcome for an actor. `flows --root .`
@@ -252,6 +252,44 @@ the map, prints every fraction to stdout, and serves a dashboard over all four t
 `http://127.0.0.1:4321` (loopback only) — reading `data/` fresh on every request, so editing a row
 and reloading shows the change without a restart. `--no-serve` stops after the print, for CI or a
 script that only wants the numbers.
+
+## Distribution
+
+Three ways to reach the same `scripts/map.mjs` and `scripts/serve.mjs`, in priority order for
+anything that wants automatic fallback (`find-map.mjs` in a consumer repo is the reference
+implementation):
+
+1. **Inside Claude Code**, the plugin marketplace: `${CLAUDE_PLUGIN_ROOT}` (see the top of this
+   file). Updates arrive with `/plugin update genesis@genesis` — nothing to script.
+2. **A sibling checkout**, for developing the tool itself: point `GENESIS_PLUGIN_ROOT` at it, or
+   let a consumer's locator find it beside its own repo.
+3. **Everyone else — CI, a fresh machine, a repo with no local checkout — npm:**
+   ```bash
+   npx --yes --package=@marktiderman/genesis-map@latest -- map check --root .
+   npx --yes --package=@marktiderman/genesis-map@latest -- map-serve --root .
+   ```
+   `@latest` on every invocation, not a pinned version: a consumer's CI workflow, pre-push hook,
+   and `package.json` never name a version, sha, or ref, so an improvement here reaches every
+   consumer on its next run with nothing edited on their side. What that costs, and what pays for
+   it:
+   - **Integrity** comes from npm itself, not from pinning — every fetch is checked against the
+     sha512 the registry recorded at publish time, and `--provenance` (see
+     `.github/workflows/publish-map.yml`) attaches a signed SLSA attestation tying a version to
+     the commit and workflow run that built it. A version, once published, cannot be overwritten —
+     unlike a git ref such as `main`, which the old CI wiring tracked and which is exactly as
+     mutable as its name suggests.
+   - **Reproducibility survives the float** because the *output* carries what the *input* no
+     longer pins: `map version` prints the resolved version, and `npm view
+     @marktiderman/genesis-map@<version> gitHead` recovers the exact source commit from any
+     version, indefinitely. Put the first in a CI log line and the second answers "what produced
+     this" months later — without freezing which version ran today.
+   - Publishing is itself automatic: `.github/workflows/publish-map.yml` runs on every push to
+     `main` that touches `skills/map/`, computes the next version from what the registry currently
+     holds (never from a committed number — nothing here is hand-bumped either), and publishes.
+     Rows carry no version stamp (see the file header on why they carry no timestamp either) —
+     `map check` cannot yet distinguish "the code changed and you forgot to re-sync" from "map
+     learned to see more since these rows were written." That distinction is future work; today
+     both look like drift.
 
 ## What it cannot see
 

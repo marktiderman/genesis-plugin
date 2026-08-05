@@ -40,10 +40,11 @@ import { loadMapTables, outFile, renderUserFlowsDoc } from "./lib/flows.mjs";
 
 const HELP = `map — map a codebase into gitdata rows
 
-  map init  [--root <dir>]   first run: extract surfaces, propose a feature inventory
-  map sync  [--root <dir>]   re-extract surfaces and resources, report what changed
-  map check [--root <dir>]   report without writing; exit 1 on findings (CI, pre-push)
-  map flows [--root <dir>]   regenerate the generated flows doc from data/flows/
+  map init    [--root <dir>]   first run: extract surfaces, propose a feature inventory
+  map sync    [--root <dir>]   re-extract surfaces and resources, report what changed
+  map check   [--root <dir>]   report without writing; exit 1 on findings (CI, pre-push)
+  map flows   [--root <dir>]   regenerate the generated flows doc from data/flows/
+  map version                  print the published version this checkout/install resolves to
 
 Reads:  <root>/src/App.tsx (surfaces), <root>/src/**, <root>/supabase/** (resources),
         <root>/src/lib/nav-registry.ts (optional), <root>/data/{features,surfaces,flows}/ (flows)
@@ -964,6 +965,24 @@ function checkFlows(root) {
 // ── entry ───────────────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
 const command = argv[0];
+
+// Answers "which version produced this" without touching a generated file: rows carry no
+// timestamp or version (see header — a fact that changes with the tool differs on every run,
+// and a check that always fails is a check nobody reads). The version lives here instead, in
+// something a CI log line or a person can read on demand and nothing else depends on.
+if (command === "version" || command === "--version" || command === "-v") {
+  let version = "unknown";
+  try {
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    version = pkg.version;
+  } catch {
+    // A plugin checkout that predates this file, or one trimmed of package.json, still runs —
+    // it just can't say its own version. Reported as "unknown", not fatal.
+  }
+  console.log(`@marktiderman/genesis-map ${version}`);
+  process.exit(0);
+}
+
 const rootFlag = argv.indexOf("--root");
 if (rootFlag !== -1 && (!argv[rootFlag + 1] || argv[rootFlag + 1].startsWith("--"))) {
   // Caught here, not in the try below: this runs before it, and `resolve(undefined)`

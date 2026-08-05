@@ -1,0 +1,40 @@
+{
+  "name": "@marktiderman/genesis-map",
+  "version": "0.1.0",
+  "description": "Map a codebase into gitdata rows: every screen the router reaches, the resources it reads and writes, and authored flows verified against both. Node built-ins only, no runtime dependencies.",
+  "type": "module",
+  "license": "MIT",
+  "homepage": "https://github.com/marktiderman/genesis-plugin/tree/main/skills/map",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marktiderman/genesis-plugin.git",
+    "directory": "skills/map"
+  },
+  "bugs": {
+    "url": "https://github.com/marktiderman/genesis-plugin/issues"
+  },
+  "bin": {
+    "map": "scripts/map.mjs",
+    "map-serve": "scripts/serve.mjs"
+  },
+  "files": [
+    "scripts/map.mjs",
+    "scripts/serve.mjs",
+    "scripts/lib",
+    "SKILL.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "map",
+    "codebase",
+    "gitdata",
+    "cli",
+    "surfaces",
+    "resources"
+  ]
+}
