@@ -1,5 +1,5 @@
 ---
-name: one-three-one
+name: 1-3-1
 description: >-
   The 1-3-1 decision framework — ONE clear problem, THREE distinct options, advantages and
   disadvantages of each, ONE recommendation and the call. Use when facing any non-trivial
