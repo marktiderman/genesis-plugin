@@ -280,6 +280,28 @@ describe("destructive operations", () => {
     assert.equal(check.code, 0, "the gate must be clearable");
   });
 
+  test("a row in a shard is a row: reported gone, then removed by the wholesale rewrite", () => {
+    // "Rows replaced wholesale" was false of a nested row, and a gitdata table may shard —
+    // data/surfaces/2026/01/x.md is a row of `surfaces`. Both the rewrite and the drift check read
+    // one flat level, so a stale row in a shard survived every sync, `check` printed "Map is
+    // current." and exited 0, and gitdata went on loading a screen that no longer existed. The
+    // committed map was wrong in the one way this tool exists to notice, and it reported clean.
+    const root = repo(`<Route path="a" element={<Alpha />} />`, { Alpha: "" });
+    run(root);
+    const dir = join(root, "data/surfaces");
+    const stale = join(dir, "2026/01/stale.md");
+    mkdirSync(join(dir, "2026/01"), { recursive: true });
+    writeFileSync(stale, "---\nid: stale\ntitle: A screen deleted months ago\n---\n");
+
+    const check = run(root, "check");
+    assert.equal(check.code, 1, "a stale row in a shard must fail the gate, not read as current");
+    assert.match(check.out, /gone.*2026\/01\/stale\.md/, "the finding must name where the row lives");
+
+    run(root);
+    assert.ok(!existsSync(stale), "the wholesale rewrite left a shard behind");
+    assert.equal(run(root, "check").code, 0, "and `sync` must clear what `check` reported");
+  });
+
   test("fails on a duplicate id instead of overwriting a row", () => {
     // `Messages` and `MessagesPage` both derive the id `messages`; one silently replaced the
     // other, and the drift map — keyed by the same id — could not see the loss.
