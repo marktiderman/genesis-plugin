@@ -145,6 +145,42 @@ describe("loadMapTables", () => {
     assert.equal(surfaces.size, 0);
     assert.deepEqual(flows, []);
   });
+
+  test("a table documented in `ReadMe.md` is documentation here too, not a row", () => {
+    // This reader's row rule was `f !== "README.md"` — case-SENSITIVE — while gitdata's loader and
+    // the rest of this tool exclude `readme.md` in any casing. So `ReadMe.md` was a row to this
+    // half alone, the frontmatter reader threw `no frontmatter block` on it, and `map check` exited
+    // 1 with nothing `sync` could do about it. Documenting a table broke the gate, again.
+    const root = repoWithFeature();
+    put(root, "data/features/ReadMe.md", "What a feature row means. Documentation, not a row.\n");
+    put(root, "data/surfaces/ReadMe.md", "What a surface row means. Documentation, not a row.\n");
+    const { errors, features } = loadMapTables(root);
+    assert.deepEqual(errors, [], "a documented table must not be an error");
+    assert.equal(features.size, 1, "the README was counted as a feature row");
+    assert.equal(run(root, "check").code, 0, "the gate must be clearable");
+  });
+
+  test("a sharded table's rows are loaded and verified, not silently skipped", () => {
+    // One flat read meant a row in a shard was not seen at all — and unseen is not neutral here.
+    // A flow in a shard was never checked, so a step naming a deleted surface passed; a surface in
+    // a shard was not in the table, so a step naming it failed as nonexistent. Both directions
+    // wrong, both silent, from the same missing recursion.
+    const root = repoWithFeature();
+    put(root, "data/flows/2026/01/FL-001--do-it.md", FLOW());
+    const { errors, flows } = loadMapTables(root);
+    assert.deepEqual(errors, [], "a sharded flow must resolve like a flat one");
+    assert.equal(flows.length, 1, "the sharded flow was not loaded");
+    assert.equal(flows[0].steps[0].surface, "alpha");
+  });
+
+  test("a sharded flow with a broken reference still fails — the shard is not a hiding place", () => {
+    const root = repoWithFeature();
+    put(root, "data/flows/2026/01/FL-001--do-it.md", FLOW({ steps: "1. `ghost-screen` — do it" }));
+    const { errors } = loadMapTables(root);
+    assert.match(errors.join("\n"), /step 1 names surface "ghost-screen", which does not exist/);
+    // The path locates the row inside the table, so the error says which shard to open.
+    assert.match(errors.join("\n"), /flows\/2026\/01\/FL-001--do-it\.md/);
+  });
 });
 
 describe("computeAuthoredCoverage", () => {
