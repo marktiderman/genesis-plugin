@@ -20,7 +20,7 @@ version — pull the latest at any time with `/plugin update genesis@genesis`.
 | Skill | What it does |
 | --- | --- |
 | `/1-3-1` | ONE problem → THREE distinct options → pros and cons → ONE recommendation. |
-| `/align` | Reflect intent back with a concrete sketch and drive to a fast yes/no before building. |
+| `/align` | An alignment check: numbered, layered assertions from framing to fine tuning, verified or clarified by number until both sides share one worldview. |
 | `/debrief` | Close a work cycle in four lines with one concrete 1% improvement. |
 | `/map` | Extract every screen a codebase has into rows, joined to hand-written features, verify authored flows against them, and fail a build when the map stops being true. |
 
