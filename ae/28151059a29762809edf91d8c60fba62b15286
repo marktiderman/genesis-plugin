@@ -1,0 +1,19 @@
+skills/one-three-one/SKILL.md
+  s_b68019e80cfee7::t_530080f2454804 38-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ae28151059a29762809edf91d8c60fba62b15286",
+  "prompts": {},
+  "sessions": {
+    "s_b68019e80cfee7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dcda8696-a32b-45cd-8ec2-9ba61ce433c5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Mark Tiderman <marktiderman@users.noreply.github.com>"
+    }
+  }
+}
