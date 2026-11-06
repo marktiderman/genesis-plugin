@@ -1,0 +1,21 @@
+evals/1-3-1-owner-quote/graders/quotes-owner.md
+  s_2b93d8bc42c448::t_bdcd2aec1bf2cf 5
+evals/eval-test-a-skill/graders/should-not-fire-case.md
+  s_2b93d8bc42c448::t_bdcd2aec1bf2cf 4,6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "599ae7a3a6d5aca6c2e603a8913a5cdaa3598161",
+  "prompts": {},
+  "sessions": {
+    "s_2b93d8bc42c448": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d1e712-fa31-474d-880d-8eb808f30ed6",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Mark Tiderman <marktiderman@users.noreply.github.com>"
+    }
+  }
+}
