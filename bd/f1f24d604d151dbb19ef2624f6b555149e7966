@@ -1,0 +1,57 @@
+evals/1-3-1-no-trigger/graders/no-options.md
+  s_2b93d8bc42c448::t_30917c4d58d4c0 1-8
+evals/eval-test-a-skill/prompt.md
+  s_2b93d8bc42c448::t_55969d39a31be4 7
+evals/1-3-1-owner-quote/graders/recommendation-last.md
+  s_2b93d8bc42c448::t_30917c4d58d4c0 5,7
+evals/workcycle-own-it/graders/ran-a-test.md
+  s_2b93d8bc42c448::t_30917c4d58d4c0 6
+  s_2b93d8bc42c448::t_26ad3eedfdf22a 4
+evals/review-adversarial/graders/catches-contradiction.md
+  s_2b93d8bc42c448::t_30917c4d58d4c0 8
+  s_2b93d8bc42c448::t_26ad3eedfdf22a 5
+evals/1-3-1-decision/graders/test-simpler.md
+  s_2b93d8bc42c448::t_f63f1f733cfbb7 5,7
+evals/eval-test-a-skill/graders/wrote-cases.md
+  s_2b93d8bc42c448::t_30917c4d58d4c0 2-5,7
+evals/1-3-1-no-trigger/graders/answer.md
+  s_2b93d8bc42c448::t_30917c4d58d4c0 4
+evals/review-adversarial/graders/target-written.md
+  s_2b93d8bc42c448::t_30917c4d58d4c0 2-4,6
+evals/workcycle-own-it/graders/log-has-one-percent.md
+  s_2b93d8bc42c448::t_30917c4d58d4c0 5,7
+evals/1-3-1-owner-quote/graders/quotes-owner.md
+  s_2b93d8bc42c448::t_30917c4d58d4c0 5,8
+evals/1-3-1-decision/graders/test-three-real-options.md
+  s_2b93d8bc42c448::t_f63f1f733cfbb7 5,7
+evals/workcycle-own-it/graders/log-has-hypothesis.md
+  s_2b93d8bc42c448::t_30917c4d58d4c0 5,7
+evals/1-3-1-decision/graders/test-greenfield.md
+  s_2b93d8bc42c448::t_f63f1f733cfbb7 5,7
+evals/1-3-1-decision/graders/test-intent.md
+  s_2b93d8bc42c448::t_f63f1f733cfbb7 5,7
+evals/1-3-1-decision/graders/no-invented-intent.md
+  s_2b93d8bc42c448::t_30917c4d58d4c0 5,8
+evals/1-3-1-decision/graders/test-reuse.md
+  s_2b93d8bc42c448::t_f63f1f733cfbb7 5,7
+evals/1-3-1-decision/graders/test-upstream.md
+  s_2b93d8bc42c448::t_f63f1f733cfbb7 5,7
+evals/eval-test-a-skill/graders/should-not-fire-case.md
+  s_2b93d8bc42c448::t_30917c4d58d4c0 2-4,6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bdf1f24d604d151dbb19ef2624f6b555149e7966",
+  "prompts": {},
+  "sessions": {
+    "s_2b93d8bc42c448": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d1e712-fa31-474d-880d-8eb808f30ed6",
+        "model": "unknown"
+      },
+      "human_author": "Mark Tiderman <marktiderman@users.noreply.github.com>"
+    }
+  }
+}
