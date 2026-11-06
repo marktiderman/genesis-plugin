@@ -1,0 +1,35 @@
+evals/workcycle-own-it/graders/skill-fired.md
+  s_2b93d8bc42c448::t_cb13ce6d4b2a93 1-5
+evals/eval-test-a-skill/graders/skill-fired.md
+  s_2b93d8bc42c448::t_cb13ce6d4b2a93 1-5
+evals/workcycle-own-it/graders/ran-a-test.md
+  s_2b93d8bc42c448::t_cb13ce6d4b2a93 1-5
+evals/eval-test-a-skill/prompt.md
+  s_2b93d8bc42c448::t_cb13ce6d4b2a93 1-13
+evals/workcycle-own-it/prompt.md
+  s_2b93d8bc42c448::t_cb13ce6d4b2a93 1-7
+evals/eval-test-a-skill/graders/wrote-cases.md
+  s_2b93d8bc42c448::t_cb13ce6d4b2a93 1-4
+evals/eval-test-a-skill/graders/should-not-fire-case.md
+  s_2b93d8bc42c448::t_cb13ce6d4b2a93 1-6
+evals/workcycle-own-it/graders/log-has-hypothesis.md
+  s_2b93d8bc42c448::t_cb13ce6d4b2a93 1-6
+evals/workcycle-own-it/graders/log-has-one-percent.md
+  s_2b93d8bc42c448::t_cb13ce6d4b2a93 1-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "31e64dca25f10ea34c21c2787b6e472ca09aa251",
+  "prompts": {},
+  "sessions": {
+    "s_2b93d8bc42c448": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d1e712-fa31-474d-880d-8eb808f30ed6",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Mark Tiderman <marktiderman@users.noreply.github.com>"
+    }
+  }
+}
