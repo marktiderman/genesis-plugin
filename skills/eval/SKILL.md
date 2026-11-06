@@ -13,6 +13,47 @@ description: >-
 Never trust a skill because it reads well. Prove it on a fresh agent that has never seen this
 conversation, against a baseline without it.
 
+## Write the cases as files, in this layout
+
+Put the suite in `evals/` at the plugin root. One folder per case:
+
+```
+evals/<case>/prompt.md            # frontmatter: description, max_turns, timeout_seconds, allowed_tools
+                                  # body: the request exactly as a user would type it
+evals/<case>/graders/<name>.md    # one check per file, for example:
+```
+
+```markdown
+---
+type: tool_used          # did the skill fire?
+tool: Skill
+input_match: '"skill"\s*:\s*"(?:[\w-]+:)?<skill-name>"'
+---
+```
+
+```markdown
+---
+type: tool_used          # in a should-not-fire case: it must stay quiet
+tool: Skill
+input_match: '"skill"\s*:\s*"(?:[\w-]+:)?<skill-name>"'
+min: 0
+max: 0
+arm: both
+---
+```
+
+```markdown
+---
+type: regex              # did the output keep the skill's required shape?
+target: last_message
+flags: i
+pattern: '<a part the skill requires>'
+---
+```
+
+Write the files first, then run them (below). Reading a skill and saying it looks right is not
+a test.
+
 ## What to prove, in order
 
 | Layer | Question | How |
