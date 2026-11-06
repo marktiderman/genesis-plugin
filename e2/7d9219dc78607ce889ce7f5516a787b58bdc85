@@ -1,0 +1,49 @@
+evals/RUNS.md
+  s_2b93d8bc42c448::t_bdf9e442b49ecc 1-6,9-14
+  s_2b93d8bc42c448::t_14038f8f615d2e 7-8
+evals/1-3-1-owner-quote/graders/recommendation-last.md
+  s_2b93d8bc42c448::t_72b5bfbbda2afd 1-7
+skills/1-3-1/SKILL.md
+  s_2b93d8bc42c448::t_b13f3ce139bd4d 1-15,43-109
+  s_2b93d8bc42c448::t_15b431fc79e7ba 16-42
+evals/1-3-1-owner-quote/prompt.md
+  s_2b93d8bc42c448::t_72b5bfbbda2afd 1-7
+evals/1-3-1-no-trigger/graders/answer.md
+  s_2b93d8bc42c448::t_72b5bfbbda2afd 1-5
+evals/1-3-1-owner-quote/graders/skill-fired.md
+  s_2b93d8bc42c448::t_72b5bfbbda2afd 1-5
+evals/1-3-1-owner-quote/graders/quotes-owner.md
+  s_2b93d8bc42c448::t_72b5bfbbda2afd 1-8
+.gitignore
+  s_2b93d8bc42c448::t_41a6d5b7f38e35 1
+skills/workcycle/SKILL.md
+  s_2b93d8bc42c448::t_4cad180ba4a414 20-24
+evals/1-3-1-decision/graders/skill-fired.md
+  s_2b93d8bc42c448::t_30cae68e97b0c6 4
+evals/1-3-1-no-trigger/prompt.md
+  s_2b93d8bc42c448::t_72b5bfbbda2afd 1-9
+README.md
+  s_2b93d8bc42c448::t_4cad180ba4a414 32
+evals/install-probe.sh
+  s_2b93d8bc42c448::t_72b5bfbbda2afd 1-38
+skills/eval/SKILL.md
+  s_2b93d8bc42c448::t_107ad226234f5c 1-58
+evals/1-3-1-no-trigger/graders/not-fired.md
+  s_2b93d8bc42c448::t_72b5bfbbda2afd 1-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e27d9219dc78607ce889ce7f5516a787b58bdc85",
+  "prompts": {},
+  "sessions": {
+    "s_2b93d8bc42c448": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d1e712-fa31-474d-880d-8eb808f30ed6",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Mark Tiderman <marktiderman@users.noreply.github.com>"
+    }
+  }
+}
