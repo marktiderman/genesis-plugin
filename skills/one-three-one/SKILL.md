@@ -35,8 +35,9 @@ Don't take the obvious option because it arrived first. Run 1-3-1.
 Before you bring the call to anyone, answer each of these about it, explicitly and in writing. If
 the call fails a test, the decision is not ready: keep working on the options until it passes
 every test, or say plainly what evidence is still missing. Passing is not always a "yes": "no
-simpler option exists" passes test 5, and an invention made after reuse and extension were tried
-and ruled out passes test 6.
+simpler option exists" passes test 5, and an invention passes test 6 when reuse and extension
+were tried and ruled out, it is invented in the app first with the reason stated, and it recreates
+nothing that exists or should exist upstream.
 
 1. **Upstream, not duct tape.** Does it solve the problem at its source, or does it patch
    downstream because the existing code happens to be shaped a certain way? Name the root cause it
