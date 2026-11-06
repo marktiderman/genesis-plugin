@@ -7,7 +7,9 @@
 set -u
 BRANCH="$1"
 mkdir -p "$2" || exit 1
-OUT="$(cd "$2" && pwd)"
+# CDPATH= keeps cd quiet; stop if the path won't resolve, so rm -rf never runs on /profile.
+OUT="$(CDPATH= cd -- "$2" && pwd -P)" || exit 1
+[ -n "$OUT" ] || exit 1
 PROFILE="$OUT/profile"
 WORK="$OUT/repo"
 rm -rf "$PROFILE" "$WORK"
