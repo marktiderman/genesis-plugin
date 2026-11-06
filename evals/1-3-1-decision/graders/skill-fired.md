@@ -1,5 +1,5 @@
 ---
 type: tool_used
 tool: Skill
-input_match: '"skill"\s*:\s*"(?:[\w-]+:)?1-3-1"'
+input_match: '"skill"\s*:\s*"(?:[\w-]+:)?(?:1-3-1|one-three-one)"'
 ---

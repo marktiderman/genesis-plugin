@@ -17,9 +17,11 @@ You own the outcome, not the first attempt. Keep looping until the work is merge
 1. **Hypothesis.** One sentence: "If we <change>, then <measurable result>." Name what would
    prove it wrong.
 2. **Experiment.** The smallest real test of it: a run, an eval, a fresh agent, a user's real
-   task. Prefer a real specimen to a reading of the code.
-3. **Learn.** Write what happened, with evidence (a file:line, a score, a transcript), in the
-   cycle's learnings log. Say plainly when the hypothesis failed.
+   task. Prefer a real specimen to a reading of the code. For agent setups (skills, rules,
+   hooks), use `/genesis:eval`.
+3. **Learn and debrief.** Write what happened, with evidence (a file:line, a score, a
+   transcript), and the one 1% better, in the cycle's log. Say plainly when the hypothesis
+   failed.
 4. **Change.** Fix what the evidence points at. A design choice goes through `/genesis:1-3-1`.
 5. **Repeat** from 1 with the next hypothesis, until the done check passes.
 

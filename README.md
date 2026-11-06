@@ -29,6 +29,7 @@ launch. To update by hand, run `/plugin update genesis@genesis`.
 | `/genesis:debrief` | Close a work cycle in four lines with one concrete 1% improvement. |
 | `/genesis:map` | Extract every screen a codebase has into rows, joined to hand-written features, verify authored flows against them, and fail a build when the map stops being true. |
 | `/genesis:workcycle` | Own work to merge-ready: hypothesis → experiment → learn → change, looped, with a learnings log. |
+| `/genesis:eval` | Prove an agent setup works on fresh agents (loads, triggers, followed, right outcome), with a run log. |
 | `/genesis:review` | Independent adversarial review by several agents (five 1% changes and three 10x upgrades each, every claim cited), then a verified triage. |
 
 Each skill runs as `/genesis:<name>`, where `<name>` is the `name` in its `SKILL.md` frontmatter.

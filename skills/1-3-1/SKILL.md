@@ -1,19 +1,44 @@
 ---
 name: 1-3-1
 description: >-
-  The 1-3-1 decision framework — ONE clear problem, THREE distinct options, advantages and
-  disadvantages of each, ONE recommendation and the call. Use when facing any non-trivial
-  decision: a fork in the approach, a contradiction between requirements, a tradeoff with no
-  obvious winner, or whenever you catch yourself about to take the first option that came to
-  mind. Also use when the user says "1-3-1", "give me options", "what are the alternatives",
-  or asks you to make a judgment call. Use it for every design or architecture decision — data
-  model, service boundaries, where code runs, refactor scope, API shape, migration strategy —
-  and run its six tests before bringing the call to anyone.
+  Use before making any choice between approaches: when asked "should we X or Y", "which
+  approach", "make the call", "what do you recommend", "give me options", "1-3-1", or when you are
+  about to pick a design, an architecture, where code or content lives, an API shape, a data
+  model, a migration or a tool. Lays out ONE problem, THREE real options and the six tests
+  (upstream, greenfield best practice, three real options, the owner's intent, could it be
+  simpler, reuse then extend then invent), then ONE recommendation, last.
 ---
 
 # 1-3-1 — one problem, three options, one call
 
 Don't take the obvious option because it arrived first. Run 1-3-1.
+
+## Write your answer in this shape, in this order
+
+Even when asked to "make the call", don't state the call first. The reader needs the tests to
+trust it.
+
+```
+## The problem
+<one sentence, at its source>
+
+## Options
+1. <name>: how it works, its cost, its risk, who it serves
+2. <name>: …
+3. <name>: …
+
+## The six tests, for the option I recommend
+1. Upstream: <the root cause it removes, or "missing: …">
+2. Greenfield best practice: <the primary source or standard pattern, or "missing: …">
+3. Three real options: <why each option actually solves the problem>
+4. Owner's intent: <their words, quoted. If you have none, write "no quote from the owner;
+   this needs their call". Never invent it.>
+5. Could it be simpler: <the simpler option, and why it does or doesn't reach the outcome>
+6. Reuse, extend, invent: <what it reuses, extends and invents>
+
+## Recommendation
+<the option, and which advantage outweighs which disadvantage>
+```
 
 ## The framework
 
