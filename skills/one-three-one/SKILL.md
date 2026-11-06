@@ -33,15 +33,19 @@ Don't take the obvious option because it arrived first. Run 1-3-1.
 ## The six tests (every design decision)
 
 Before you bring the call to anyone, answer each of these about it, explicitly and in writing. If
-any answer is "no", the decision is not ready: keep working on the options until every answer is
-"yes", or say plainly what evidence is still missing.
+the call fails a test, the decision is not ready: keep working on the options until it passes
+every test, or say plainly what evidence is still missing. Passing is not always a "yes": "no
+simpler option exists" passes test 5, and an invention made after reuse and extension were tried
+and ruled out passes test 6.
 
 1. **Upstream, not duct tape.** Does it solve the problem at its source, or does it patch
    downstream because the existing code happens to be shaped a certain way? Name the root cause it
    removes. A fix that only exists because of today's implementation is a symptom of the problem.
 2. **Greenfield best practice.** If you were building this fresh, is this how it would be done?
    Ground it in primary sources — the platform's own docs, the standard pattern for this kind of
-   system — not in habit or in what the codebase already does.
+   system — not in habit or in what the codebase already does. Judge the target design, not the
+   path to it: a backfill, a dual write or a staged cutover that only exists to move today's data
+   doesn't fail this test, as long as it is temporary and has an end.
 3. **Three real options.** Does each option actually solve the problem? A straw man that exists to
    make the favourite look good doesn't count. If you can only find one real option, the problem
    is probably stated too narrowly — restate it at its source.
