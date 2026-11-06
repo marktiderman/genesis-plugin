@@ -18,7 +18,7 @@ The plugin sets a `version`, so you stay on a release until the next one is publ
 turns auto-update **off** for marketplaces outside Anthropic's own, so turn it on once: in
 `/plugin`, open the **Marketplaces** tab, select `genesis`, and choose **Enable auto-update**. Or
 set it in settings (below). New releases then install in the background and load at your next
-launch. To update by hand, run `/plugin update genesis@genesis`.
+launch. To update by hand, run `claude plugin update genesis@genesis` in a shell, then restart.
 
 ## Skills
 
@@ -72,7 +72,8 @@ ships as an npm package (`@marktiderman/genesis-map`); CI pins an exact version.
 ## Evals
 
 `evals/` holds one case per skill behaviour that matters, built from real decisions and reviews.
-Run them with `claude plugin eval .` from the repo root. Each case runs with and without the
+Run them from the repo root with `claude plugin eval . --allow-tools Bash Write Edit`: some cases
+write files or run a test, and those tools need the grant. Each case runs with and without the
 plugin, so the score shows what the plugin adds. Runs are billed model calls.
 
 ## Contributing

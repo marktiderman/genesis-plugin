@@ -35,4 +35,5 @@ Don't cap the list. Bring back every proposal worth the owner's time.
 
 ## 5. Ask
 
-End by asking which proposals to adopt. Change nothing the owner hasn't approved.
+End by asking which proposals to adopt. Apply no proposal the owner hasn't approved; corrections
+of fact are the only changes you make without asking, and you list each one.

@@ -35,4 +35,4 @@ Follow `references/triage.md`. In short:
 3. **Split** corrections of fact (fix them in the target now) from proposals (the owner decides).
 4. **Don't cap the list.** Bring back every proposal worth the owner's time, each in one or two
    plain sentences.
-5. **Ask** the owner which proposals to adopt. Change nothing they haven't approved.
+5. **Ask** the owner which proposals to adopt. Apply no proposal they haven't approved.

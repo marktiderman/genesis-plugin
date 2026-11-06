@@ -12,4 +12,6 @@ One row per run. Newest last. With / without are case scores (0–1); Δ = with 
 | 5 | 2026-11-06 | e3e70c4 + template | 1-3-1-no-trigger | It stays quiet on a rename | 1.00 | 1.00 | 0.00 | $0.28 | No false trigger | — |
 | 6 | 2026-11-06 | e27d921 + workcycle case | workcycle-own-it | Owning a small task, the agent keeps a log with hypothesis and 1% better, and runs a real test | 1.00 | 0.33 | +0.67 | $1.48 | Without the skill agents do the work and test it, but write no hypothesis or 1% better | — |
 
+Rows 2–5 ran on uncommitted edits on top of e3e70c4; those edits were committed in e27d921. The exact working tree each row measured was not saved.
+
 Install probe (`evals/install-probe.sh`), 2026-11-06, branch `claude/review-skill-and-evals`: marketplace add from the branch, install, load all passed; skills listed in a fresh session. The probe's own agent step needs a signed-in profile, so behaviour is proven by the evals above instead.

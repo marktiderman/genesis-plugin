@@ -96,7 +96,9 @@ last.
 
 - **Record it** wherever this project keeps decisions — a decision log, the PR description, an
   issue comment, a commit message. The trail matters more than the venue: someone should be able
-  to reconstruct _why_ later, including the options you rejected.
+  to reconstruct _why_ later, including the options you rejected. Post to a shared record (an
+  issue, a PR) only when your task already covers that or the owner agrees; otherwise give the
+  decision in your reply.
 - **Execute it.** A documented decision that stalls waiting for approval is a blocked decision.
   If you have the authority, make the call and keep moving — the written trail is how the owner
   stays in the loop without becoming a bottleneck, and any call can be reversed.
