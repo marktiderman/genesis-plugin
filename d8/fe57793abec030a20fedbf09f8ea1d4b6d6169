@@ -1,0 +1,52 @@
+evals/align-before-build/graders/asks-yes-no.md
+  s_2b93d8bc42c448::t_3066481ef52ee6 1-6
+scripts/check-skills.mjs
+  s_2b93d8bc42c448::t_232346ad8a5662 1-24,27-30
+  s_2b93d8bc42c448::t_3066481ef52ee6 25-26
+evals/align-before-build/graders/no-build.md
+  s_2b93d8bc42c448::t_3066481ef52ee6 1-8
+evals/debrief-cycle/graders/one-percent-is-an-action.md
+  s_2b93d8bc42c448::t_3066481ef52ee6 1-6
+README.md
+  s_2b93d8bc42c448::t_232346ad8a5662 33
+.github/workflows/plugin-checks.yml
+  s_2b93d8bc42c448::t_232346ad8a5662 1-26
+evals/align-before-build/graders/skill-fired.md
+  s_2b93d8bc42c448::t_3066481ef52ee6 1-5
+evals/skill-new-command/graders/skill-fired.md
+  s_2b93d8bc42c448::t_232346ad8a5662 1-5
+evals/align-before-build/prompt.md
+  s_2b93d8bc42c448::t_3066481ef52ee6 1-7
+evals/debrief-cycle/graders/four-lines.md
+  s_2b93d8bc42c448::t_3066481ef52ee6 1-6
+skills/skill/SKILL.md
+  s_2b93d8bc42c448::t_3a7e388233d4ff 1-60
+skills/skill/references/carriers.md
+  s_2b93d8bc42c448::t_6f1448f2e21a36 1-24
+evals/skill-new-command/graders/reuses-review.md
+  s_2b93d8bc42c448::t_232346ad8a5662 1-8
+evals/skill-new-command/graders/shape.md
+  s_2b93d8bc42c448::t_232346ad8a5662 1-6
+evals/skill-new-command/prompt.md
+  s_2b93d8bc42c448::t_232346ad8a5662 1-7
+evals/debrief-cycle/graders/skill-fired.md
+  s_2b93d8bc42c448::t_3066481ef52ee6 1-5
+evals/debrief-cycle/prompt.md
+  s_2b93d8bc42c448::t_3066481ef52ee6 1-7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d8fe57793abec030a20fedbf09f8ea1d4b6d6169",
+  "prompts": {},
+  "sessions": {
+    "s_2b93d8bc42c448": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d1e712-fa31-474d-880d-8eb808f30ed6",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Mark Tiderman <marktiderman@users.noreply.github.com>"
+    }
+  }
+}
