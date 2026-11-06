@@ -4,7 +4,7 @@ max_turns: 30
 timeout_seconds: 600
 allowed_tools: [Read, Write, Glob, Grep, Skill]
 ---
-I wrote this skill and saved it as `skills/standup/SKILL.md` in my plugin. Does it work? Test it properly.
+I wrote this skill for my plugin; it goes in `skills/standup/SKILL.md`. Does it work? Test it properly.
 
 ---
 name: standup
