@@ -20,10 +20,12 @@ Rules of thumb:
 - **Must never be missed in the main session:** root CLAUDE.md, kept short. Explore and Plan
   subagents start without it, so a rule they need also goes in a `SubagentStart` hook. Keep the
   rules in AGENTS.md if other tools read it too, and have CLAUDE.md import it with `@AGENTS.md`, so
-  they load on any version. Only the `managed-only` setting, which drops project files, leaves them out.
+  they load on any version. Two settings still leave them out: `managed-only`, and a
+  `claudeMdExcludes` pattern that matches that CLAUDE.md.
 - **Depth:** a skill.
-- **Zero exceptions for tool calls:** a deny rule, or a hook set to block when it fails (a hook that
-  can't run or times out lets the call through otherwise; see the hooks reference). A real security
+- **Zero exceptions for tool calls:** a deny rule, or a hook with `"onFailure": "block"` (Claude Code
+  v2.1.295 or later). Without it, a hook that can't start, exits with a code other than 0 or 2, or
+  times out lets the call through. A real security
   boundary also needs the sandbox.
 - **Enforced before merge:** CI on pull requests, made a required check in branch protection.
 - **To test injected context, forbid tools:** otherwise the agent's own file search hides whether the context arrived.
