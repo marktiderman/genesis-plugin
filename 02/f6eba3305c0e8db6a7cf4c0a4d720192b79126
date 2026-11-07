@@ -1,0 +1,22 @@
+evals/RUNS.md
+  s_2b93d8bc42c448::t_111aec43f4ea82 14-18
+  s_2b93d8bc42c448::t_9ba0ad6744e44a 19
+scripts/check-skills.mjs
+  s_2b93d8bc42c448::t_c7ce6d4aee1ece 28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "02f6eba3305c0e8db6a7cf4c0a4d720192b79126",
+  "prompts": {},
+  "sessions": {
+    "s_2b93d8bc42c448": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d1e712-fa31-474d-880d-8eb808f30ed6",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Mark Tiderman <marktiderman@users.noreply.github.com>"
+    }
+  }
+}
