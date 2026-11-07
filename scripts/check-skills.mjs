@@ -25,7 +25,7 @@ const graded = new Set(
       // The value after "skill": an optional (?:[\w-]+:)? or literal plugin prefix, then a name or (?:a|b).
       [...t.matchAll(/^input_match:\s*'"skill"\\s\*:\\s\*"(.+)"'\s*$/gm)].flatMap((m) =>
         m[1]
-          .replace(/^\(\?:\[\\w-\]\+:\)\?/, "")
+          .replace(/^\(\?:[^()]*:\)\?/, "")
           .replace(/^[\w-]+:(?=[\w(])/, "")
           .replace(/^\(\?:|\)$/g, "")
           .split("|"),
