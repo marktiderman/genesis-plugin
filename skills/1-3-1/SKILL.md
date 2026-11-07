@@ -55,6 +55,7 @@ name the limit, and never add an option they ruled out.
 2. **THREE options.** Generate at least three genuinely distinct approaches. One is usually
    obvious. The second takes effort. **The third is where the creativity lives** — forcing it is
    the entire point of the framework. If your third option is a strawman, you haven't found it yet.
+   The one exception: the owner limited the choice to fewer than three (see the template).
 
 3. **Advantages and disadvantages.** For each option, honestly. An option with no downsides means
    you haven't understood it. An option with no upsides shouldn't be on the list.
@@ -81,7 +82,8 @@ nothing that exists or should exist upstream.
    doesn't fail this test, as long as it is temporary and has an end.
 3. **Three real options.** Does each option actually solve the problem? A straw man that exists to
    make the favourite look good doesn't count. If you can only find one real option, the problem
-   is probably stated too narrowly — restate it at its source.
+   is probably stated too narrowly — restate it at its source. When the owner limited the choice,
+   test the options they allowed and name the limit.
 4. **User value and the owner's intent.** Is the call rooted in what the people using the product
    need, or in what the owner said they want? Quote their words where they exist. "Easiest from
    where the code is today" is not a reason.
