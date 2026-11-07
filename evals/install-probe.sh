@@ -23,7 +23,11 @@ if [ "${REPO%%/*}" != "${MARKETPLACE%%/*}" ] && [ "${PROBE_REPO_TRUSTED:-}" != 1
   echo "install-probe: $REPO isn't under ${MARKETPLACE%%/*}; read its .claude/settings.json first, then set PROBE_REPO_TRUSTED=1" >&2
   exit 1
 fi
-if [ -e "$2" ] && [ -n "$(ls -A -- "$2")" ]; then
+if [ -e "$2" ] && ! listing="$(ls -A -- "$2")"; then
+  echo "install-probe: can't list $2; give it a new or empty folder you can read" >&2
+  exit 1
+fi
+if [ -e "$2" ] && [ -n "$listing" ]; then
   echo "install-probe: $2 isn't empty; give it a new or empty folder (it never deletes anything)" >&2
   exit 1
 fi

@@ -5,7 +5,7 @@ docs (memory, skills, hooks, sub-agents, plugins, cloud-environments, claude-pro
 
 | Carrier | Loads | Local | Cloud session | Project thread | Cowork | Use for |
 |---|---|---|---|---|---|---|
-| Root `CLAUDE.md`, and `AGENTS.md` where the Claude Code version and settings load it (otherwise a `CLAUDE.md` that imports `@AGENTS.md`) | every session start, and again after compaction | ✓ | ✓ | `CLAUDE.md` only | n/a | the few rules an agent must never miss; reviewers read root CLAUDE.md too |
+| Root `CLAUDE.md`. `AGENTS.md` loads directly only from Claude Code v2.1.277 and, by default, only when there's no `CLAUDE.md`, so a `CLAUDE.md` that imports `@AGENTS.md` is the reliable form | every session start, and again after compaction | ✓ | ✓ | `CLAUDE.md` only | n/a | the few rules an agent must never miss; reviewers read root CLAUDE.md too |
 | `.claude/rules/*.md` without `paths` | session start | ✓ | ✓ | root rules only | n/a | always-on rules split by topic |
 | `.claude/rules/*.md` with `paths`, nested `CLAUDE.md` | when the agent first touches a matching file | ✓ | ✓ | ✗ | n/a | rules for one area of the code |
 | Skill (repo `.claude/skills` or plugin) | its description every turn; the body when it fires | ✓ | repo ✓, plugin via account | via account or Project plugin | via account | procedures and depth |
@@ -20,7 +20,7 @@ Rules of thumb:
 - **Must never be missed in the main session:** root CLAUDE.md, kept short. Explore and Plan
   subagents start without it, so a rule they need also goes in a `SubagentStart` hook. Keep the
   rules in AGENTS.md if other tools read it too, and have CLAUDE.md import it with `@AGENTS.md`, so
-  they load whatever the version or settings.
+  they load on any version. Only the `managed-only` setting, which drops project files, leaves them out.
 - **Depth:** a skill.
 - **Zero exceptions for tool calls:** a deny rule, or a hook set to block when it fails (a hook that
   can't run or times out lets the call through otherwise; see the hooks reference). A real security
