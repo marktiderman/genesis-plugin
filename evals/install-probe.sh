@@ -7,7 +7,8 @@
 #   PROBE_MARKETPLACE  the marketplace repo (default marktiderman/genesis-plugin)
 #   PROBE_PLUGIN       plugin@marketplace to install (default genesis@genesis)
 #   PROBE_PROMPT       a request that should trigger the skill under test (default: a 1-3-1 decision)
-#   PROBE_REPO         the public repo the agent works in (default marktiderman/genesis)
+#   PROBE_REPO         the public repo the agent works in (default marktiderman/genesis); one outside
+#                      the marketplace's owner needs PROBE_REPO_TRUSTED=1
 # Exits nonzero if a setup step fails; otherwise exits with the agent's status.
 set -u
 BRANCH="$1"
@@ -16,6 +17,12 @@ PLUGIN="${PROBE_PLUGIN:-genesis@genesis}"
 DEFAULT_PROMPT="Our packages need instructions for the coding agents that build apps with them. Should each package's agent instructions ship inside its npm package (our CLI copies them into the app on install and upgrade) or in our shared Claude Code plugin? Make the call."
 PROMPT="${PROBE_PROMPT:-$DEFAULT_PROMPT}"
 REPO="${PROBE_REPO:-marktiderman/genesis}"
+# The agent runs inside a clone of PROBE_REPO, and a repo's own settings can run hooks there, so
+# only a repo under the marketplace's owner runs unless PROBE_REPO_TRUSTED=1 says you checked it.
+if [ "${REPO%%/*}" != "${MARKETPLACE%%/*}" ] && [ "${PROBE_REPO_TRUSTED:-}" != 1 ]; then
+  echo "install-probe: $REPO isn't under ${MARKETPLACE%%/*}; read its .claude/settings.json first, then set PROBE_REPO_TRUSTED=1" >&2
+  exit 1
+fi
 if [ -e "$2" ] && [ -n "$(ls -A -- "$2")" ]; then
   echo "install-probe: $2 isn't empty; give it a new or empty folder (it never deletes anything)" >&2
   exit 1

@@ -82,7 +82,7 @@ Prefer the ones that give the same answer every run: `tool_used`, `regex`, `file
 ## The loop (one row per run)
 
 1. **Hypothesis.** "If <change>, then <case> scores <X> with and <Y> without."
-2. **Run.** `claude plugin eval . --case <name> --runs 3 --trust-plugin --no-publish --json <file>`
+2. **Run.** `claude plugin eval . --case <name> --runs 3 --allow-tools Bash Write Edit --trust-plugin --no-publish --json <file>`
    (each case runs isolated, with and without the plugin; runs are billed).
 3. **Read the failures,** not just the score. Open the run's output and see what the agent wrote.
 4. **Record the row** in `evals/RUNS.md`: date, commit, case, hypothesis, with / without / Δ,

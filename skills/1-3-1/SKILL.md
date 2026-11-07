@@ -4,7 +4,8 @@ description: >-
   Use before making any choice between approaches: when asked "should we X or Y", "which
   approach", "make the call", "what do you recommend", "give me options", "1-3-1", or when you are
   about to pick a design, an architecture, where code or content lives, an API shape, a data
-  model, a migration or a tool. Lays out ONE problem, THREE real options and the six tests
+  model, a migration, or a tool or library the project will depend on. Not for routine steps
+  inside a task (which file to read, which command to run). Lays out ONE problem, THREE real options and the six tests
   (upstream, greenfield best practice, three real options, the owner's intent, could it be
   simpler, reuse then extend then invent), then ONE recommendation, last.
 ---
@@ -27,12 +28,16 @@ trust it.
 2. <name>: …
 3. <name>: …
 
+If the owner limits the choice to fewer than three (two approved vendors, say), compare only those,
+name the limit, and never add an option they ruled out.
+
 ## The six tests, for the option I recommend
 1. Upstream: <the root cause it removes, or "missing: …">
 2. Greenfield best practice: <the primary source or standard pattern, or "missing: …">
 3. Three real options: <why each option actually solves the problem>
-4. Owner's intent: <their words, quoted. If you have none, write "no quote from the owner;
-   this needs their call". Never invent it.>
+4. Owner's intent: <their words, quoted. If you have none, write "no quote from the owner" and
+   never invent it. That alone doesn't stop you: make the call if you have the authority, and
+   say "this needs their call" only when the escalation rule below applies.>
 5. Could it be simpler: <the simpler option, and why it does or doesn't reach the outcome>
 6. Reuse, extend, invent: <what it reuses, extends and invents>
 

@@ -13,12 +13,17 @@ docs (memory, skills, hooks, sub-agents, plugins, cloud-environments, claude-pro
 | `SessionStart` hook | session start, resume, clear, compact | ✓ | ✓ (repo hooks) | ✗ | n/a | live facts (branch, versions) |
 | `SubagentStart` hook | when a subagent starts | ✓ | ✓ | ✗ | n/a | Explore and Plan start without CLAUDE.md |
 | `PreToolUse` hook / `permissions.deny` | before a tool call | ✓ | ✓ | deny rules: ✗ | n/a | rules the agent's own tool calls must never break. They check tool calls only: a script the agent runs can still open the file, so a real boundary needs the sandbox's file and network limits |
-| Subagent `skills:` frontmatter | the full skill at the subagent's start | ✓ | ✓ | ✗ | ✓ | a reviewer that must know a method |
-| CI check | on the events its workflow names (here: pull requests, and pushes to `main`) | always | always | always | always | the gate every merge passes |
+| Subagent `skills:` frontmatter | the full skill at the subagent's start (not a skill with `disable-model-invocation: true`, which is skipped) | ✓ | ✓ | ✗ | ✓ | a reviewer that must know a method |
+| CI check | on the events its workflow names (here: pull requests, and pushes to `main`) | always | always | always | always | a merge gate only where branch protection requires it; otherwise a signal |
 
 Rules of thumb:
-- **Must never be missed:** root CLAUDE.md, kept short. Keep the rules in AGENTS.md if other tools read it too, and have CLAUDE.md import it with `@AGENTS.md`, so they load whatever the version or settings.
+- **Must never be missed in the main session:** root CLAUDE.md, kept short. Explore and Plan
+  subagents start without it, so a rule they need also goes in a `SubagentStart` hook. Keep the
+  rules in AGENTS.md if other tools read it too, and have CLAUDE.md import it with `@AGENTS.md`, so
+  they load whatever the version or settings.
 - **Depth:** a skill.
-- **Zero exceptions for tool calls:** a deny rule or a hook. A real security boundary also needs the sandbox.
-- **Enforced before merge:** CI on pull requests.
+- **Zero exceptions for tool calls:** a deny rule, or a hook set to block when it fails (a hook that
+  can't run or times out lets the call through otherwise; see the hooks reference). A real security
+  boundary also needs the sandbox.
+- **Enforced before merge:** CI on pull requests, made a required check in branch protection.
 - **To test injected context, forbid tools:** otherwise the agent's own file search hides whether the context arrived.

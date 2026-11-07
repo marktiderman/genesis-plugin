@@ -7,16 +7,19 @@ const root = process.cwd();
 const readme = readFileSync(path.join(root, "README.md"), "utf8");
 const evalsDir = path.join(root, "evals");
 const cases = existsSync(evalsDir) ? readdirSync(evalsDir, { withFileTypes: true }).filter((d) => d.isDirectory() && d.name !== "results").map((d) => d.name) : [];
-const caseText = cases.map((c) => {
+const graderFiles = cases.flatMap((c) => {
   const dir = path.join(evalsDir, c, "graders");
-  return existsSync(dir) ? readdirSync(dir).map((f) => readFileSync(path.join(dir, f), "utf8")).join("\n") : "";
+  return existsSync(dir) ? readdirSync(dir).map((f) => readFileSync(path.join(dir, f), "utf8")) : [];
 });
 // The skills a Skill-call grader names: the alternatives in its input_match "skill" value, e.g.
 // '"skill"\s*:\s*"(?:[\w-]+:)?(?:1-3-1|one-three-one)"' names 1-3-1 and one-three-one.
+// Only a grader that needs the skill to fire counts: a should-not-fire one (max: 0) proves nothing.
 const graded = new Set(
-  caseText.flatMap((t) =>
-    [...t.matchAll(/^input_match:\s*'"skill".*?\)\?(.+)"'\s*$/gm)].flatMap((m) => m[1].replace(/^\(\?:|\)$/g, "").split("|")),
-  ),
+  graderFiles
+    .filter((t) => !/^max:\s*0\s*$/m.test(t))
+    .flatMap((t) =>
+      [...t.matchAll(/^input_match:\s*'"skill".*?\)\?(.+)"'\s*$/gm)].flatMap((m) => m[1].replace(/^\(\?:|\)$/g, "").split("|")),
+    ),
 );
 const problems = [];
 for (const d of readdirSync(path.join(root, "skills"), { withFileTypes: true })) {
