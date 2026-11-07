@@ -22,7 +22,14 @@ const graded = new Set(
     .filter((f) => /^type:\s*tool_used\s*$/m.test(f) && /^tool:\s*Skill\s*$/m.test(f))
     .filter((f) => !/^min:\s*0\s*$/m.test(f) && !/^max:\s*0\s*$/m.test(f))
     .flatMap((t) =>
-      [...t.matchAll(/^input_match:\s*'"skill".*?\)\?(.+)"'\s*$/gm)].flatMap((m) => m[1].replace(/^\(\?:|\)$/g, "").split("|")),
+      // The value after "skill": an optional (?:[\w-]+:)? or literal plugin prefix, then a name or (?:a|b).
+      [...t.matchAll(/^input_match:\s*'"skill"\\s\*:\\s\*"(.+)"'\s*$/gm)].flatMap((m) =>
+        m[1]
+          .replace(/^\(\?:\[\\w-\]\+:\)\?/, "")
+          .replace(/^[\w-]+:(?=[\w(])/, "")
+          .replace(/^\(\?:|\)$/g, "")
+          .split("|"),
+      ),
     ),
 );
 const problems = [];
