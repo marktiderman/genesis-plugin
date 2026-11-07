@@ -1,0 +1,21 @@
+evals/eval-test-a-skill/graders/wrote-cases.md
+  s_2b93d8bc42c448::t_0e9b68cb0af50f 2-5,7-9
+scripts/check-skills.mjs
+  s_2b93d8bc42c448::t_0e9b68cb0af50f 25-32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8e1886f156796318f57d978a3e8f069dd0656a6b",
+  "prompts": {},
+  "sessions": {
+    "s_2b93d8bc42c448": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d1e712-fa31-474d-880d-8eb808f30ed6",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Mark Tiderman <marktiderman@users.noreply.github.com>"
+    }
+  }
+}
