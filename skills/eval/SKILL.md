@@ -58,7 +58,7 @@ a test.
 
 | Layer | Question | How |
 |---|---|---|
-| 1. Loads | Does a clean install load it? | `evals/install-probe.sh <branch> <out>`: an empty Claude Code profile adds the marketplace from the branch and installs, then a fresh agent works a real request; the skill loaded only if `transcript.jsonl` shows its `Skill` call |
+| 1. Loads | Does a clean install load it? | `"${CLAUDE_PLUGIN_ROOT}/evals/install-probe.sh" <branch> <new-out-dir>`, with `PROBE_PLUGIN` (plugin@marketplace), `PROBE_MARKETPLACE` (its repo) and `PROBE_PROMPT` (a request that should trigger the skill under test) for another plugin or skill: an empty Claude Code profile adds the marketplace from the branch and installs, then a fresh agent works the request; the skill loaded only if `transcript.jsonl` shows its `Skill` call |
 | 2. Triggers | Does it fire on natural phrasing, and stay quiet when it shouldn't? | `tool_used: Skill` grader; a should-not-fire case with `min: 0, max: 0, arm: both` |
 | 3. Followed | Does the output keep the skill's required shape? | `regex` graders on `last_message`, one per required part |
 | 4. Outcome | Is the result right and better than without? | the with/without Δ from `claude plugin eval`; for code, the repo's own checker (for example `genesis doctor --json` findings) |

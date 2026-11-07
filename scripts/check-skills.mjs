@@ -11,6 +11,13 @@ const caseText = cases.map((c) => {
   const dir = path.join(evalsDir, c, "graders");
   return existsSync(dir) ? readdirSync(dir).map((f) => readFileSync(path.join(dir, f), "utf8")).join("\n") : "";
 });
+// The skills a Skill-call grader names: the alternatives in its input_match "skill" value, e.g.
+// '"skill"\s*:\s*"(?:[\w-]+:)?(?:1-3-1|one-three-one)"' names 1-3-1 and one-three-one.
+const graded = new Set(
+  caseText.flatMap((t) =>
+    [...t.matchAll(/^input_match:\s*'"skill".*?\)\?(.+)"'\s*$/gm)].flatMap((m) => m[1].replace(/^\(\?:|\)$/g, "").split("|")),
+  ),
+);
 const problems = [];
 for (const d of readdirSync(path.join(root, "skills"), { withFileTypes: true })) {
   if (!d.isDirectory()) continue;
@@ -21,7 +28,7 @@ for (const d of readdirSync(path.join(root, "skills"), { withFileTypes: true }))
   if (!readme.includes(`/genesis:${name}\``)) problems.push(`${name}: not in the README skills table`);
   const lines = text.split("\n").length;
   if (lines > 500) problems.push(`${name}: SKILL.md has ${lines} lines (limit 500)`);
-  const tested = caseText.some((t) => t.includes(`${name}"`) || t.includes(`|${name})`) || t.includes(`(?:${name}|`) || t.includes(`?${name}"`));
+  const tested = graded.has(name);
   if (!tested && name !== "map") // map is tested by its own node tests in CI
     problems.push(`${name}: no eval case's grader names the skill`);
 }

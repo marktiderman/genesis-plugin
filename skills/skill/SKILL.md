@@ -42,8 +42,10 @@ so fifty overlapping skills crowd each other out and stop triggering.
 3. **Invent in the app first.** A new trigger goes in that repo's `.claude/skills/` the second
    time someone types the same instructions. A command only a person starts gets
    `disable-model-invocation: true`, which costs no context until it's used.
-4. **Promote** to this plugin when a second repo wants it, and delete the app copy in the same
-   change. A skill that must name an app or customer goes to a private plugin instead.
+4. **Promote** to this plugin when a second repo wants it. Delete the app copy only once that
+   app's sessions load the plugin (its `.claude/settings.json` enables it, and a fresh session
+   lists the skill), so nobody loses it in between. A skill that must name an app or customer goes
+   to a private plugin instead.
 5. **Gate the pull request.**
    - The description says when to use it, not what it is.
    - A required output shape goes first, as a template.
