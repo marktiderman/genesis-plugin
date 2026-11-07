@@ -1,0 +1,23 @@
+evals/debrief-cycle/prompt.md
+  s_2b93d8bc42c448::t_35425a49665105 4
+evals/align-before-build/prompt.md
+  s_2b93d8bc42c448::t_35425a49665105 4
+skills/debrief/SKILL.md
+  s_2b93d8bc42c448::t_35425a49665105 26,29-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5edea4b38011953980f18d94ce29740a58891b42",
+  "prompts": {},
+  "sessions": {
+    "s_2b93d8bc42c448": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95d1e712-fa31-474d-880d-8eb808f30ed6",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Mark Tiderman <marktiderman@users.noreply.github.com>"
+    }
+  }
+}
