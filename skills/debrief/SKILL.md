@@ -23,10 +23,12 @@ work in flight. If you completed a unit of work, you owe a debrief before callin
 - **Well** — what worked, what to keep doing.
 - **Didn't** — what broke, dragged, or surprised you.
 - **Differently** — the change to make next cycle.
-- **1% better** — ONE concrete, specific improvement.
+- **1% better** — ONE concrete, specific improvement: one action, in one sentence.
 
 The 1% is the line that matters, and it must be **an action, not a sentiment**. "Add a null check
-to the migration template" is a 1%. "Be more careful with migrations" is a wish.
+to the migration template" is a 1%. "Be more careful with migrations" is a wish. It is **one**
+action: no "and", no "or", no list. When you see two good ones, pick the one with more leverage and
+put the other in **Differently**.
 
 ## Make it durable
 
