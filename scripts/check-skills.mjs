@@ -15,9 +15,12 @@ const graderFiles = cases.flatMap((c) => {
 // '"skill"\s*:\s*"(?:[\w-]+:)?(?:1-3-1|one-three-one)"' names 1-3-1 and one-three-one.
 // Only a grader that needs the skill to fire counts: its min (default 1) must be at least 1 and its
 // max, if set, above 0. A should-not-fire grader (min: 0 or max: 0) proves nothing.
+const front = (t) => /^---\n([\s\S]*?)\n---/.exec(t)?.[1] ?? "";
 const graded = new Set(
   graderFiles
-    .filter((t) => !/^min:\s*0\s*$/m.test(t) && !/^max:\s*0\s*$/m.test(t))
+    .map(front)
+    .filter((f) => /^type:\s*tool_used\s*$/m.test(f) && /^tool:\s*Skill\s*$/m.test(f))
+    .filter((f) => !/^min:\s*0\s*$/m.test(f) && !/^max:\s*0\s*$/m.test(f))
     .flatMap((t) =>
       [...t.matchAll(/^input_match:\s*'"skill".*?\)\?(.+)"'\s*$/gm)].flatMap((m) => m[1].replace(/^\(\?:|\)$/g, "").split("|")),
     ),

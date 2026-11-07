@@ -18,12 +18,14 @@ docs (memory, skills, hooks, sub-agents, plugins, cloud-environments, claude-pro
 
 Rules of thumb:
 - **Must never be missed in the main session:** root CLAUDE.md, kept short. Explore and Plan
-  subagents start without it, so a rule they need also goes in a `SubagentStart` hook. Keep the
+  subagents start without it, so a rule they need also goes in a `SubagentStart` hook. That's best effort: if the hook
+  fails, the subagent still starts, so a rule that must hold needs a deny rule or blocking hook too. Keep the
   rules in AGENTS.md if other tools read it too, and have CLAUDE.md import it with `@AGENTS.md`, so
   they load on any version. Two settings still leave them out: `managed-only`, and a
   `claudeMdExcludes` pattern that matches that CLAUDE.md.
 - **Depth:** a skill.
-- **Zero exceptions for tool calls:** a deny rule, or a hook with `"onFailure": "block"` (Claude Code
+- **Zero exceptions for tool calls:** a deny rule (it blocks the calls its pattern matches, not every
+  spelling of the same operation: `Bash(git push *)` misses `git -C . push`), or a hook with `"onFailure": "block"` (Claude Code
   v2.1.295 or later). Without it, a hook that can't start, exits with a code other than 0 or 2, or
   times out lets the call through. A real security
   boundary also needs the sandbox.
