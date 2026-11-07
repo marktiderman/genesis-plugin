@@ -13,10 +13,11 @@ const graderFiles = cases.flatMap((c) => {
 });
 // The skills a Skill-call grader names: the alternatives in its input_match "skill" value, e.g.
 // '"skill"\s*:\s*"(?:[\w-]+:)?(?:1-3-1|one-three-one)"' names 1-3-1 and one-three-one.
-// Only a grader that needs the skill to fire counts: a should-not-fire one (max: 0) proves nothing.
+// Only a grader that needs the skill to fire counts: its min (default 1) must be at least 1 and its
+// max, if set, above 0. A should-not-fire grader (min: 0 or max: 0) proves nothing.
 const graded = new Set(
   graderFiles
-    .filter((t) => !/^max:\s*0\s*$/m.test(t))
+    .filter((t) => !/^min:\s*0\s*$/m.test(t) && !/^max:\s*0\s*$/m.test(t))
     .flatMap((t) =>
       [...t.matchAll(/^input_match:\s*'"skill".*?\)\?(.+)"'\s*$/gm)].flatMap((m) => m[1].replace(/^\(\?:|\)$/g, "").split("|")),
     ),
