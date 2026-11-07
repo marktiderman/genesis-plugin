@@ -18,6 +18,8 @@ Don't take the obvious option because it arrived first. Run 1-3-1.
 
 Even when asked to "make the call", don't state the call first. The reader needs the tests to
 trust it.
+This shape is the decision. When the task also builds something, give the decision first in this
+shape, then the usual report: what changed, what was tested, and what's blocked.
 
 ```
 ## The problem
