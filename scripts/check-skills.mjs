@@ -12,26 +12,18 @@ const graderFiles = cases.flatMap((c) => {
   return existsSync(dir) ? readdirSync(dir).map((f) => readFileSync(path.join(dir, f), "utf8")) : [];
 });
 // The skills a Skill-call grader names: the alternatives in its input_match "skill" value, e.g.
-// '"skill"\s*:\s*"(?:[\w-]+:)?(?:1-3-1|one-three-one)"' names 1-3-1 and one-three-one.
-// Only a grader that needs the skill to fire counts: its min (default 1) must be at least 1 and its
-// max, if set, above 0. A should-not-fire grader (min: 0 or max: 0) proves nothing.
+
+// A skill counts as tested when a positive Skill grader's own input_match matches a call to it,
+// with or without the plugin prefix. Only a grader that needs the skill to fire counts: its min
+// (default 1) must not be 0, nor its max. A should-not-fire grader (min: 0 or max: 0) proves nothing.
 const front = (t) => /^---\n([\s\S]*?)\n---/.exec(t)?.[1] ?? "";
-const graded = new Set(
-  graderFiles
-    .map(front)
-    .filter((f) => /^type:\s*tool_used\s*$/m.test(f) && /^tool:\s*Skill\s*$/m.test(f))
-    .filter((f) => !/^min:\s*0\s*$/m.test(f) && !/^max:\s*0\s*$/m.test(f))
-    .flatMap((t) =>
-      // The value after "skill": an optional (?:[\w-]+:)? or literal plugin prefix, then a name or (?:a|b).
-      [...t.matchAll(/^input_match:\s*'"skill"\\s\*:\\s\*"(.+)"'\s*$/gm)].flatMap((m) =>
-        m[1]
-          .replace(/^\(\?:[^()]*:\)\?/, "")
-          .replace(/^[\w-]+:(?=[\w(])/, "")
-          .replace(/^\(\?:|\)$/g, "")
-          .split("|"),
-      ),
-    ),
-);
+const skillMatchers = graderFiles
+  .map(front)
+  .filter((f) => /^type:\s*tool_used\s*$/m.test(f) && /^tool:\s*Skill\s*$/m.test(f))
+  .filter((f) => !/^min:\s*0\s*$/m.test(f) && !/^max:\s*0\s*$/m.test(f))
+  .flatMap((f) => [...f.matchAll(/^input_match:\s*'(.+)'\s*$/gm)].map((m) => new RegExp(m[1])));
+const isGraded = (name) =>
+  skillMatchers.some((re) => [`{"skill":"genesis:${name}"}`, `{"skill": "${name}"}`].some((call) => re.test(call)));
 const problems = [];
 for (const d of readdirSync(path.join(root, "skills"), { withFileTypes: true })) {
   if (!d.isDirectory()) continue;
@@ -42,7 +34,7 @@ for (const d of readdirSync(path.join(root, "skills"), { withFileTypes: true }))
   if (!readme.includes(`/genesis:${name}\``)) problems.push(`${name}: not in the README skills table`);
   const lines = text.split("\n").length;
   if (lines > 500) problems.push(`${name}: SKILL.md has ${lines} lines (limit 500)`);
-  const tested = graded.has(name);
+  const tested = isGraded(name);
   if (!tested && name !== "map") // map is tested by its own node tests in CI
     problems.push(`${name}: no eval case's grader names the skill`);
 }
