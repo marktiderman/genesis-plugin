@@ -1,0 +1,19 @@
+skills/map/scripts/map.mjs
+  s_28c953bc2876be::t_96d21d722daf7e 459
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "69ce44026b73cac4d918264332ef1d09ce557504",
+  "prompts": {},
+  "sessions": {
+    "s_28c953bc2876be": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "06e6a01e-e2ce-4a9f-818c-8bcd9a8d65c6",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Mark Tiderman <marktiderman@users.noreply.github.com>"
+    }
+  }
+}
