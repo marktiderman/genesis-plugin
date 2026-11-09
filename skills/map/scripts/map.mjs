@@ -456,7 +456,7 @@ function extractSurfaces(root, resourceIndex) {
       // Group and gating are per-scope facts: /engagements is coach-only in personal scope and
       // open in client scope. A single value for both is a lie whichever one it picks, so each is
       // recorded scope-tagged, the way `routes` already is.
-      // An app may subdivide a route scope in its nav — Breakthrough's one `team` URL prefix is
+      // An app may subdivide a route scope in its nav — a consumer app's one `team` URL prefix can be
       // three nav scopes (family, business, coaching). Those names are reported as themselves
       // rather than folded into the route scope, because folding them would have to pick one.
       const suffixes = uniq(Object.values(s.routes).flat()).map((p) => (p === "" ? "(index)" : p));
