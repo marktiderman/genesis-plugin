@@ -1,0 +1,23 @@
+.claude-plugin/marketplace.json
+  s_b9ce29ee4fad7a::t_684f1103b4f4e8 3,9,13
+.claude-plugin/plugin.json
+  s_b9ce29ee4fad7a::t_e75e8c46d3552b 2
+README.md
+  s_b9ce29ee4fad7a::t_706f628b34a578 1,12,16,36,38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "20062d3323270d1f4167ef0286d03bc2978f56c2",
+  "prompts": {},
+  "sessions": {
+    "s_b9ce29ee4fad7a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d0078c80-8dc2-4019-b242-04d3f185ab69",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Mark Tiderman <marktiderman@users.noreply.github.com>"
+    }
+  }
+}
