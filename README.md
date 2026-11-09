@@ -1,4 +1,4 @@
-# Genesis
+# marktiderman-skills
 
 Surgical, portable skills for agent-built software.
 
@@ -9,11 +9,11 @@ Surgical, portable skills for agent-built software.
 ```
 
 ```bash
-/plugin install genesis@genesis
+/plugin install marktiderman-skills@marktiderman-skills
 ```
 
 Updates reach you automatically. This plugin sets no `version` field, so every commit is a new
-version — pull the latest at any time with `/plugin update genesis@genesis`.
+version — pull the latest at any time with `/plugin update marktiderman-skills@marktiderman-skills`.
 
 ## Skills
 
@@ -33,9 +33,9 @@ Add to the project's `.claude/settings.json` so it's on by default for anyone wh
 ```json
 {
   "extraKnownMarketplaces": {
-    "genesis": { "source": { "source": "github", "repo": "marktiderman/genesis-plugin" } }
+    "marktiderman-skills": { "source": { "source": "github", "repo": "marktiderman/genesis-plugin" } }
   },
-  "enabledPlugins": { "genesis@genesis": true }
+  "enabledPlugins": { "marktiderman-skills@marktiderman-skills": true }
 }
 ```
 
