@@ -1,19 +1,51 @@
 ---
 name: 1-3-1
 description: >-
-  The 1-3-1 decision framework — ONE clear problem, THREE distinct options, advantages and
-  disadvantages of each, ONE recommendation and the call. Use when facing any non-trivial
-  decision: a fork in the approach, a contradiction between requirements, a tradeoff with no
-  obvious winner, or whenever you catch yourself about to take the first option that came to
-  mind. Also use when the user says "1-3-1", "give me options", "what are the alternatives",
-  or asks you to make a judgment call. Use it for every design or architecture decision — data
-  model, service boundaries, where code runs, refactor scope, API shape, migration strategy —
-  and run its six tests before bringing the call to anyone.
+  Use before making any choice between approaches: when asked "should we X or Y", "which
+  approach", "make the call", "what do you recommend", "give me options", "1-3-1", or when you are
+  about to pick a design, an architecture, where code or content lives, an API shape, a data
+  model, a migration, or a tool or library the project will depend on. Not for routine steps
+  inside a task (which file to read, which command to run). Lays out ONE problem, THREE real options and the six tests
+  (upstream, greenfield best practice, three real options, the owner's intent, could it be
+  simpler, reuse then extend then invent), then ONE recommendation, last.
 ---
 
 # 1-3-1 — one problem, three options, one call
 
 Don't take the obvious option because it arrived first. Run 1-3-1.
+
+## Write your answer in this shape, in this order
+
+Even when asked to "make the call", don't state the call first. The reader needs the tests to
+trust it.
+This shape is the decision. When the task also builds something, give the decision first in this
+shape, then the usual report: what changed, what was tested, and what's blocked.
+
+```
+## The problem
+<one sentence, at its source>
+
+## Options
+1. <name>: how it works, its cost, its risk, who it serves
+2. <name>: …
+3. <name>: …
+
+If the owner limits the choice to fewer than three (two approved vendors, say), compare only those,
+name the limit, and never add an option they ruled out.
+
+## The six tests, for the option I recommend
+1. Upstream: <the root cause it removes, or "missing: …">
+2. Greenfield best practice: <the primary source or standard pattern, or "missing: …">
+3. Three real options: <why each option actually solves the problem>
+4. Owner's intent: <their words, quoted. If you have none, write "no quote from the owner" and
+   never invent it. That alone doesn't stop you: make the call if you have the authority, and
+   say "this needs their call" only when the escalation rule below applies.>
+5. Could it be simpler: <the simpler option, and why it does or doesn't reach the outcome>
+6. Reuse, extend, invent: <what it reuses, extends and invents>
+
+## Recommendation
+<the option, and which advantage outweighs which disadvantage>
+```
 
 ## The framework
 
@@ -23,6 +55,7 @@ Don't take the obvious option because it arrived first. Run 1-3-1.
 2. **THREE options.** Generate at least three genuinely distinct approaches. One is usually
    obvious. The second takes effort. **The third is where the creativity lives** — forcing it is
    the entire point of the framework. If your third option is a strawman, you haven't found it yet.
+   The one exception: the owner limited the choice to fewer than three (see the template).
 
 3. **Advantages and disadvantages.** For each option, honestly. An option with no downsides means
    you haven't understood it. An option with no upsides shouldn't be on the list.
@@ -49,7 +82,8 @@ nothing that exists or should exist upstream.
    doesn't fail this test, as long as it is temporary and has an end.
 3. **Three real options.** Does each option actually solve the problem? A straw man that exists to
    make the favourite look good doesn't count. If you can only find one real option, the problem
-   is probably stated too narrowly — restate it at its source.
+   is probably stated too narrowly — restate it at its source. When the owner limited the choice,
+   test the options they allowed and name the limit.
 4. **User value and the owner's intent.** Is the call rooted in what the people using the product
    need, or in what the owner said they want? Quote their words where they exist. "Easiest from
    where the code is today" is not a reason.
@@ -71,7 +105,9 @@ last.
 
 - **Record it** wherever this project keeps decisions — a decision log, the PR description, an
   issue comment, a commit message. The trail matters more than the venue: someone should be able
-  to reconstruct _why_ later, including the options you rejected.
+  to reconstruct _why_ later, including the options you rejected. Post to a shared record (an
+  issue, a PR) only when your task already covers that or the owner agrees; otherwise give the
+  decision in your reply.
 - **Execute it.** A documented decision that stalls waiting for approval is a blocked decision.
   If you have the authority, make the call and keep moving — the written trail is how the owner
   stays in the loop without becoming a bottleneck, and any call can be reversed.

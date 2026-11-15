@@ -1,0 +1,26 @@
+# Checks every skill against the plugin's own standard: the manifest and frontmatter validate,
+# every skill is in the README table and has at least one eval case, and no SKILL.md passes
+# 500 lines. Evals themselves aren't run here: each run is a billed model call.
+name: plugin checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate the plugin
+        run: npx -y @anthropic-ai/claude-code plugin validate .
+      - name: Every skill is listed, tested and short
+        run: node scripts/check-skills.mjs
