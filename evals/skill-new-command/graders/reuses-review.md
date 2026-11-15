@@ -1,10 +1,10 @@
 ---
-type: regex
-target: last_message
-flags: i
-pattern: '\b(?:reuse|extend)[^\n]{0,120}[/`](?:[\w-]+:)?review\b|[/`](?:[\w-]+:)?review\b[^\n]{0,120}\b(?:reuse|extend)'
+type: llm
+focus: last_message
 weight: 2
 ---
-The plugin's review skill already does this; the answer should recommend reusing or extending it,
-naming the skill (`/review`, `` `review` ``, or with a plugin prefix) on the same line as "reuse"
-or "extend". A bare "review the plan" doesn't count.
+PASS if the final message recommends reusing or extending the plugin's existing review skill
+(`review`, with or without a plugin prefix) for this request, rather than creating a new skill.
+FAIL if it recommends a new skill, rejects or discourages reusing the review skill (wherever the
+negation sits, e.g. "Reuse `/review` is not recommended"), or only mentions reviewing without
+recommending the existing skill.
