@@ -31,8 +31,10 @@ You own the outcome, not the first attempt. Keep looping until the work is merge
 
 - The outcome the owner asked for is met, and a fresh run proves it.
 - Tests, evals and the repo's own checks pass.
-- An independent review (`/marktiderman-skills:review`) found nothing open, or each finding is answered.
-- The learnings log and the PR say what changed and why.
+- An independent review (`/marktiderman-skills:review`) left nothing open: each finding is fixed,
+  or the owner explicitly accepted leaving it. If a fix changed any file, the fresh run and the
+  checks above ran again after it.
+- The learnings log says what changed and why, and so does the PR when the work has one.
 - `/marktiderman-skills:debrief` names the one 1% better for next time.
 
 ## Learnings log

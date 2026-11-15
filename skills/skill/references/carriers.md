@@ -10,11 +10,16 @@ docs (memory, skills, hooks, sub-agents, plugins, cloud-environments, claude-pro
 | `.claude/rules/*.md` with `paths`, nested `CLAUDE.md` | when the agent first touches a matching file | ✓ | ✓ | ✗ | n/a | rules for one area of the code |
 | Skill (repo `.claude/skills` or plugin) | its description every turn; the body when it fires | ✓ | repo ✓, plugin via account | via account or Project plugin | via account | procedures and depth |
 | Plugin skill with `disable-model-invocation: true` | only when a person types it | ✓ | via account | via Project plugin | via account | commands only a person starts |
-| `SessionStart` hook | session start, resume, clear, compact | ✓ | ✓ (repo hooks) | ✗ | n/a | live facts (branch, versions) |
-| `SubagentStart` hook | when a subagent starts | ✓ | ✓ | ✗ | n/a | Explore and Plan start without CLAUDE.md |
-| `PreToolUse` hook / `permissions.deny` | before a tool call | ✓ | ✓ | deny rules: ✗ | n/a | rules the agent's own tool calls must never break. They check tool calls only: a script the agent runs can still open the file, so a real boundary needs the sandbox's file and network limits |
+| `SessionStart` hook | session start, resume, clear, compact | ✓ | one repo only (repo hooks) | ✗ | n/a | live facts (branch, versions) |
+| `SubagentStart` hook | when a subagent starts | ✓ | one repo only | ✗ | n/a | Explore and Plan start without CLAUDE.md |
+| `PreToolUse` hook / `permissions.deny` | before a tool call | ✓ | one repo only | ✗ | n/a | rules the agent's own tool calls must never break. They check tool calls only: a script the agent runs can still open the file, so a real boundary needs the sandbox's file and network limits |
 | Subagent `skills:` frontmatter | the full skill at the subagent's start (not a skill with `disable-model-invocation: true`, which is skipped) | ✓ | ✓ | ✗ | ✓ | a reviewer that must know a method |
 | CI check | on the events its workflow names (here: pull requests, and pushes to `main`) | always | always | always | always | a merge gate only where branch protection requires it; otherwise a signal |
+
+"One repo only": an Anthropic-hosted cloud session with several repositories reads only
+`enabledPlugins` and `extraKnownMarketplaces` from each repo's `.claude/settings.json`, so its
+hooks and deny rules don't run there, and a project thread applies none of them (code.claude.com
+docs, settings: "Settings in cloud sessions").
 
 Rules of thumb:
 - **Must never be missed in the main session:** root CLAUDE.md, kept short. Explore and Plan

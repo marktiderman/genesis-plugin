@@ -68,7 +68,15 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/<skill>/scripts/<script>.mjs"
 
 `${CLAUDE_PLUGIN_ROOT}` resolves anywhere in skill content. A relative path works only when the cwd
 happens to be this repo, which it never is once the plugin is installed. A tool that CI also runs
-ships as an npm package (`@marktiderman/genesis-map`); CI pins an exact version.
+ships as an npm package (`@marktiderman/genesis-map`). An app that runs it in its own CI should pin
+an exact version, so a new release can't break a build that didn't change.
+
+## Developing these skills
+
+This repo's `.claude/settings.json` enables the published plugin from GitHub, so a session started
+here loads the released skills, not your edits. To try a change to `skills/` before it ships, start
+Claude Code with the checkout as a plugin: `claude --plugin-dir .`. To test a pushed branch in a
+clean install, use `evals/install-probe.sh` (see `/marktiderman-skills:eval`).
 
 ## Evals
 
