@@ -5,7 +5,7 @@
 # Usage: install-probe.sh <branch> <out-dir>
 #   <out-dir> must not exist yet, or be empty: the probe owns it and never deletes anything.
 #   PROBE_MARKETPLACE  the marketplace repo (default marktiderman/genesis-plugin)
-#   PROBE_PLUGIN       plugin@marketplace to install (default genesis@genesis)
+#   PROBE_PLUGIN       plugin@marketplace to install (default marktiderman-skills@marktiderman-skills)
 #   PROBE_PROMPT       a request that should trigger the skill under test (default: a 1-3-1 decision)
 #   PROBE_REPO         the public repo the agent works in (default marktiderman/genesis); one outside
 #                      the marketplace's owner needs PROBE_REPO_TRUSTED=1
@@ -13,7 +13,7 @@
 set -u
 BRANCH="$1"
 MARKETPLACE="${PROBE_MARKETPLACE:-marktiderman/genesis-plugin}"
-PLUGIN="${PROBE_PLUGIN:-genesis@genesis}"
+PLUGIN="${PROBE_PLUGIN:-marktiderman-skills@marktiderman-skills}"
 DEFAULT_PROMPT="Our packages need instructions for the coding agents that build apps with them. Should each package's agent instructions ship inside its npm package (our CLI copies them into the app on install and upgrade) or in our shared Claude Code plugin? Make the call."
 PROMPT="${PROBE_PROMPT:-$DEFAULT_PROMPT}"
 REPO="${PROBE_REPO:-marktiderman/genesis}"

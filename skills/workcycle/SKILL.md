@@ -18,11 +18,11 @@ You own the outcome, not the first attempt. Keep looping until the work is merge
    prove it wrong.
 2. **Experiment.** The smallest real test of it: a run, an eval, a fresh agent, a user's real
    task. Prefer a real specimen to a reading of the code. For agent setups (skills, rules,
-   hooks), use `/genesis:eval`.
+   hooks), use `/marktiderman-skills:eval`.
 3. **Learn and debrief.** Write what happened, with evidence (a file:line, a score, a
    transcript), and the one 1% better, in the cycle's log. Say plainly when the hypothesis
    failed.
-4. **Change.** Fix what the evidence points at. A design choice goes through `/genesis:1-3-1`.
+4. **Change.** Fix what the evidence points at. A design choice goes through `/marktiderman-skills:1-3-1`.
 5. **Repeat** from 1 with the next hypothesis, until the done check passes. If a required check
    or the independent review can't run, stop: report the blocker and what is still unverified,
    and don't call the work merge-ready.
@@ -31,9 +31,9 @@ You own the outcome, not the first attempt. Keep looping until the work is merge
 
 - The outcome the owner asked for is met, and a fresh run proves it.
 - Tests, evals and the repo's own checks pass.
-- An independent review (`/genesis:review`) found nothing open, or each finding is answered.
+- An independent review (`/marktiderman-skills:review`) found nothing open, or each finding is answered.
 - The learnings log and the PR say what changed and why.
-- `/genesis:debrief` names the one 1% better for next time.
+- `/marktiderman-skills:debrief` names the one 1% better for next time.
 
 ## Learnings log
 

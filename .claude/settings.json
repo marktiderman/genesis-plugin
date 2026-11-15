@@ -1,9 +1,9 @@
 {
   "extraKnownMarketplaces": {
-    "genesis": {
+    "marktiderman-skills": {
       "source": { "source": "github", "repo": "marktiderman/genesis-plugin" },
       "autoUpdate": true
     }
   },
-  "enabledPlugins": { "genesis@genesis": true }
+  "enabledPlugins": { "marktiderman-skills@marktiderman-skills": true }
 }

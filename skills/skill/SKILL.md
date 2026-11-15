@@ -51,8 +51,8 @@ so fifty overlapping skills crowd each other out and stop triggering.
    - A required output shape goes first, as a template.
    - `SKILL.md` stays under 500 lines, with depth in `references/`.
    - Eval cases cover a natural trigger, a should-not-fire request and a truth-under-pressure
-     case (`/genesis:eval`).
-   - An independent review signs it off (`/genesis:review`).
+     case (`/marktiderman-skills:eval`).
+   - An independent review signs it off (`/marktiderman-skills:review`).
 
    Use Anthropic's `skill-creator` for drafting and description tuning.
 6. **Prune** monthly with `/skill-doctor`: retire skills that never fire and merge ones that

@@ -23,7 +23,7 @@ const skillMatchers = graderFiles
   .filter((f) => !/^min:\s*0\s*$/m.test(f) && !/^max:\s*0\s*$/m.test(f))
   .flatMap((f) => [...f.matchAll(/^input_match:\s*'(.+)'\s*$/gm)].map((m) => new RegExp(m[1])));
 const isGraded = (name) =>
-  skillMatchers.some((re) => [`{"skill":"genesis:${name}"}`, `{"skill": "${name}"}`].some((call) => re.test(call)));
+  skillMatchers.some((re) => [`{"skill":"marktiderman-skills:${name}"}`, `{"skill": "${name}"}`].some((call) => re.test(call)));
 const problems = [];
 for (const d of readdirSync(path.join(root, "skills"), { withFileTypes: true })) {
   if (!d.isDirectory()) continue;
@@ -31,7 +31,7 @@ for (const d of readdirSync(path.join(root, "skills"), { withFileTypes: true }))
   if (!existsSync(file)) continue;
   const text = readFileSync(file, "utf8");
   const name = /^name:\s*(.+)$/m.exec(text)?.[1]?.trim() ?? d.name;
-  if (!readme.includes(`/genesis:${name}\``)) problems.push(`${name}: not in the README skills table`);
+  if (!readme.includes(`/marktiderman-skills:${name}\``)) problems.push(`${name}: not in the README skills table`);
   const lines = text.split("\n").length;
   if (lines > 500) problems.push(`${name}: SKILL.md has ${lines} lines (limit 500)`);
   const tested = isGraded(name);

@@ -1,4 +1,4 @@
-# Genesis
+# marktiderman-skills
 
 Surgical, portable skills for agent-built software.
 
@@ -9,31 +9,32 @@ Surgical, portable skills for agent-built software.
 ```
 
 ```bash
-/plugin install genesis@genesis
+/plugin install marktiderman-skills@marktiderman-skills
 ```
 
 ## Updates
 
 The plugin sets a `version`, so you stay on a release until the next one is published. Claude Code
 turns auto-update **off** for marketplaces outside Anthropic's own, so turn it on once: in
-`/plugin`, open the **Marketplaces** tab, select `genesis`, and choose **Enable auto-update**. Or
-set it in settings (below). New releases then install in the background and load at your next
-launch. To update by hand, run `claude plugin update genesis@genesis` in a shell, then restart.
+`/plugin`, open the **Marketplaces** tab, select `marktiderman-skills`, and choose **Enable
+auto-update**. Or set it in settings (below). New releases then install in the background and load
+at your next launch. To update by hand, run
+`claude plugin update marktiderman-skills@marktiderman-skills` in a shell, then restart.
 
 ## Skills
 
 | Skill | What it does |
 | --- | --- |
-| `/genesis:1-3-1` | ONE problem → THREE distinct options → the six tests → ONE recommendation. |
-| `/genesis:align` | Reflect intent back with a concrete sketch and drive to a fast yes/no before building. |
-| `/genesis:debrief` | Close a work cycle in four lines with one concrete 1% improvement. |
-| `/genesis:map` | Extract every screen a codebase has into rows, joined to hand-written features, verify authored flows against them, and fail a build when the map stops being true. |
-| `/genesis:workcycle` | Own work to merge-ready: hypothesis → experiment → learn → change, looped, with a learnings log. |
-| `/genesis:eval` | Prove an agent setup works on fresh agents (loads, triggers, followed, right outcome), with a run log. |
-| `/genesis:skill` | Add or change a skill by reuse, then extend, then invent; gate it with evals and a review; prune with /skill-doctor. |
-| `/genesis:review` | Independent adversarial review by several agents (five 1% changes and three 10x upgrades each, every claim cited), then a verified triage. |
+| `/marktiderman-skills:1-3-1` | ONE problem → THREE distinct options → the six tests → ONE recommendation. |
+| `/marktiderman-skills:align` | Reflect intent back with a concrete sketch and drive to a fast yes/no before building. |
+| `/marktiderman-skills:debrief` | Close a work cycle in four lines with one concrete 1% improvement. |
+| `/marktiderman-skills:map` | Extract every screen a codebase has into rows, joined to hand-written features, verify authored flows against them, and fail a build when the map stops being true. |
+| `/marktiderman-skills:workcycle` | Own work to merge-ready: hypothesis → experiment → learn → change, looped, with a learnings log. |
+| `/marktiderman-skills:eval` | Prove an agent setup works on fresh agents (loads, triggers, followed, right outcome), with a run log. |
+| `/marktiderman-skills:skill` | Add or change a skill by reuse, then extend, then invent; gate it with evals and a review; prune with /skill-doctor. |
+| `/marktiderman-skills:review` | Independent adversarial review by several agents (five 1% changes and three 10x upgrades each, every claim cited), then a verified triage. |
 
-Each skill runs as `/genesis:<name>`, where `<name>` is the `name` in its `SKILL.md` frontmatter.
+Each skill runs as `/marktiderman-skills:<name>`, where `<name>` is the `name` in its `SKILL.md` frontmatter.
 Claude also reaches for a skill on its own when the situation matches its description.
 
 ## Enable it for a project
@@ -44,12 +45,12 @@ there:
 ```json
 {
   "extraKnownMarketplaces": {
-    "genesis": {
+    "marktiderman-skills": {
       "source": { "source": "github", "repo": "marktiderman/genesis-plugin" },
       "autoUpdate": true
     }
   },
-  "enabledPlugins": { "genesis@genesis": true }
+  "enabledPlugins": { "marktiderman-skills@marktiderman-skills": true }
 }
 ```
 
