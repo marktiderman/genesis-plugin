@@ -16,8 +16,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
-import { stripJs } from "./resources.js";
-
 const ROUTES_DIR = "src/routes";
 
 /** Every file under `dir`, relative to `root`, in a stable order. */
@@ -59,8 +57,7 @@ export function tanstackRoutes(root, dir = ROUTES_DIR) {
   const found = [];
   for (const file of walk(root, dir)) {
     if (!/\.(t|j)sx?$/.test(file) || /\.(test|spec)\./.test(file)) continue;
-    // Comments blanked first: a commented-out route is not a route.
-    const src = stripJs(readFileSync(join(root, file), "utf8"));
+    const src = readFileSync(join(root, file), "utf8");
     // The route is the one assigned (`Route = createFileRoute("…")({ … })`), not a call that sits
     // in a string, and its component is read from that call's own options.
     // Matching runs on a copy with every string's contents blanked, so text inside a string
@@ -75,7 +72,7 @@ export function tanstackRoutes(root, dir = ROUTES_DIR) {
     if (!id.trim()) continue;
     const last = id.split("/").filter(Boolean).pop() ?? "";
     // A pathless layout (`_layout`) is not a screen, but it still counts as its parent's child.
-    found.push({ id, url: routeUrl(id), file: relative(root, join(root, file)), outlet: /<Outlet\b/.test(src), pathless: last.startsWith("_") });
+    found.push({ id, url: routeUrl(id), file: relative(root, join(root, file)), outlet: /<Outlet\b/.test(code), pathless: last.startsWith("_") });
   }
   // A route that renders <Outlet /> and has child routes (by id, whatever the file layout: a
   // folder, `posts.index.tsx`, `posts/route.tsx`) is its children's layout, not a screen.
@@ -108,9 +105,9 @@ function opensJsx(src, i) {
 }
 
 /**
- * `src` (comments already stripped) with string contents and JSX text blanked to spaces, length
- * and newlines kept, so nothing written as text (`'Route = createFileRoute(…)'`,
- * `<p>Don't panic</p>`) is read as code. A small scanner: code, JSX tags and JSX text, with
+ * `src` with comments, string contents and JSX text blanked to spaces, length and newlines kept,
+ * so nothing written as text or commented out (`'Route = createFileRoute(…)'`,
+ * `<p>Don't panic</p>`, `// createFileRoute(…)`) is read as code. A small scanner: code, JSX tags and JSX text, with
  * `{…}` expressions inside JSX read as code again.
  */
 function blankStrings(src) {
@@ -129,6 +126,14 @@ function blankStrings(src) {
   for (let i = 0; i < src.length; i++) {
     const f = stack[stack.length - 1];
     const c = src[i];
+    if ((f.mode === "code" || f.mode === "tag") && c === "/" && (src[i + 1] === "/" || src[i + 1] === "*")) {
+      // A comment, in code or between a tag's attributes (JSX text has none: `//` there is text).
+      const end = src[i + 1] === "/" ? src.indexOf("\n", i) : src.indexOf("*/", i + 2);
+      const stop = end === -1 ? src.length : src[i + 1] === "/" ? end : end + 2;
+      blank(i, stop);
+      i = stop - 1;
+      continue;
+    }
     if (f.mode === "code") {
       if (c === '"' || c === "'" || c === "`") i = skipString(i, c);
       else if (c === "<" && opensJsx(src, i)) stack.push({ mode: "tag", closing: false });

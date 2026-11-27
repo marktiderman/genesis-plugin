@@ -105,6 +105,16 @@ describe("tanstackRoutes, the review's cases", () => {
     const root = app({ "src/routes/new.tsx": "const id = <T,>(x: T) => x;\nconst pick = <K extends string>(k: K) => k;\n" + route("/new") });
     assert.deepEqual(tanstackRoutes(root).map((s) => s.url), ["/new"]);
   });
+  test("a comment after JSX text with an apostrophe is still a comment", () => {
+    const src = "const Page = () => <p>Don't panic</p>; // Route = createFileRoute('/old')({ component: Old });\n" + "export const Route = createFileRoute('/new')({ component: Page });";
+    const root = app({ "src/routes/new.tsx": src });
+    assert.deepEqual(tanstackRoutes(root).map((s) => s.url), ["/new"]);
+  });
+  test("a block comment and a URL in JSX text", () => {
+    const src = "/* Route = createFileRoute('/old')({ component: Old }) */\nconst Page = () => <p>See https://x.dev</p>;\n" + route("/new");
+    const root = app({ "src/routes/new.tsx": src });
+    assert.deepEqual(tanstackRoutes(root).map((s) => s.url), ["/new"]);
+  });
   test("the component is read from the route's own options", () => {
     const root = app({ "src/routes/x.tsx": 'export const Route = createFileRoute("/x")({ loader: f });\nconst other = { component: Y };' });
     assert.deepEqual(tanstackRoutes(root), []);
