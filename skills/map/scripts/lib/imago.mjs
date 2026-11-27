@@ -89,46 +89,75 @@ export function tanstackRoutes(root, dir = ROUTES_DIR) {
   return screens.sort((a, b) => a.url.localeCompare(b.url) || a.file.localeCompare(b.file));
 }
 
-/**
- * Whether a quote at `i` opens a string. In code a string follows an operator, a bracket, a
- * comma or a keyword (`return "…"`); in JSX text (`<p>Don't panic</p>`) the quote follows a
- * word, and is just a character.
- */
-function opensString(src, i) {
+/** Whether a `<` at `i` starts a JSX element: in expression position, before a name or `>`. */
+function opensJsx(src, i) {
+  if (!/[A-Za-z>]/.test(src[i + 1] ?? "")) return false;
+  // A generic arrow in a .tsx file (`<T,>(x: T) =>`, `<T extends U>(…)`) is not an element.
+  if (/^<[A-Za-z_$][\w$]*\s*(,|extends\b)/.test(src.slice(i, i + 80))) return false;
   let k = i - 1;
   while (k >= 0 && /\s/.test(src[k])) k--;
   if (k < 0) return true;
   const p = src[k];
-  if (p === ">") return src[k - 1] === "="; // `=> "…"`, not the end of a JSX tag
+  if (p === ">") return src[k - 1] === "="; // `=> <p>`
   if (/[\w$]/.test(p)) {
     let w = k;
     while (w > 0 && /[\w$]/.test(src[w - 1])) w--;
-    return /^(return|case|typeof|in|of|await|yield|else|void|delete|throw|export|from|import)$/.test(src.slice(w, k + 1));
+    return /^(return|case|default|else|yield|await|do)$/.test(src.slice(w, k + 1));
   }
-  return !/[)\]}"'`]/.test(p);
+  return /[(=,:?&|!{}[;]/.test(p);
 }
 
-/** `src` with each string's contents replaced by spaces (quotes and length kept). */
+/**
+ * `src` (comments already stripped) with string contents and JSX text blanked to spaces, length
+ * and newlines kept, so nothing written as text (`'Route = createFileRoute(…)'`,
+ * `<p>Don't panic</p>`) is read as code. A small scanner: code, JSX tags and JSX text, with
+ * `{…}` expressions inside JSX read as code again.
+ */
 function blankStrings(src) {
-  let out = "";
-  for (let i = 0; i < src.length; i++) {
-    const c = src[i];
-    if ((c !== '"' && c !== "'" && c !== "`") || !opensString(src, i)) {
-      out += c;
-      continue;
-    }
-    out += c;
+  const out = src.split("");
+  const blank = (a, b) => {
+    for (let x = a; x < b; x++) if (out[x] !== "\n") out[x] = " ";
+  };
+  // Frames: { mode: "code", braces, inJsx } | { mode: "tag", closing } | { mode: "text" }
+  const stack = [{ mode: "code", braces: 0, inJsx: false }];
+  const skipString = (i, q) => {
     let j = i + 1;
-    for (; j < src.length && src[j] !== c; j++) {
-      if (src[j] === "\\" && j + 1 < src.length) {
-        out += "  ";
-        j++;
-      } else out += src[j] === "\n" ? "\n" : " ";
+    while (j < src.length && src[j] !== q) j += src[j] === "\\" ? 2 : 1;
+    blank(i + 1, Math.min(j, src.length));
+    return j;
+  };
+  for (let i = 0; i < src.length; i++) {
+    const f = stack[stack.length - 1];
+    const c = src[i];
+    if (f.mode === "code") {
+      if (c === '"' || c === "'" || c === "`") i = skipString(i, c);
+      else if (c === "<" && opensJsx(src, i)) stack.push({ mode: "tag", closing: false });
+      else if (c === "{") f.braces++;
+      else if (c === "}") {
+        if (f.braces > 0) f.braces--;
+        else if (f.inJsx) stack.pop();
+      }
+    } else if (f.mode === "tag") {
+      if (c === '"' || c === "'") i = skipString(i, c);
+      else if (c === "{") stack.push({ mode: "code", braces: 0, inJsx: true });
+      else if (c === "/" && src[i + 1] === ">") {
+        stack.pop();
+        i++;
+      } else if (c === ">") {
+        if (f.closing) stack.pop();
+        else stack[stack.length - 1] = { mode: "text" };
+      }
+    } else {
+      // JSX text
+      if (c === "{") stack.push({ mode: "code", braces: 0, inJsx: true });
+      else if (c === "<" && src[i + 1] === "/") {
+        stack[stack.length - 1] = { mode: "tag", closing: true };
+        i++;
+      } else if (c === "<") stack.push({ mode: "tag", closing: false });
+      else if (c !== "\n") out[i] = " ";
     }
-    if (j < src.length) out += c;
-    i = j;
   }
-  return out;
+  return out.join("");
 }
 
 /** The text of the call whose `(` is at `open`, to its matching `)`, in string-blanked code. */
@@ -153,7 +182,7 @@ function hasTopLevelComponent(body) {
     const c = body[i];
     if (c === "(" || c === "{" || c === "[") depth++;
     else if (c === ")" || c === "}" || c === "]") depth--;
-    else if (depth === 2 && body.startsWith("component", i) && !/[\w$]/.test(body[i - 1] ?? "")) {
+    else if (depth === 2 && body.startsWith("component", i) && /[{,]/.test(body.slice(0, i).trimEnd().slice(-1))) {
       const rest = body.slice(i + "component".length);
       if (/^\s*[:,}]/.test(rest) || /^\s*\(/.test(rest)) return true;
     }

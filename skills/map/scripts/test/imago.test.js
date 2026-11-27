@@ -84,6 +84,27 @@ describe("tanstackRoutes, the review's cases", () => {
     const root = app({ "src/routes/y.tsx": 'function component() {}\nexport const Route = createFileRoute("/y")({ component });' });
     assert.deepEqual(tanstackRoutes(root).map((s) => s.url), ["/y"]);
   });
+  test("a quote after punctuation in JSX text is still text", () => {
+    const root = app({ "src/routes/new.tsx": "const Page = () => <p>Hello! 'Tis the season</p>;\n" + 'export const Route = createFileRoute("/new")({ component: Page });' });
+    assert.deepEqual(tanstackRoutes(root).map((s) => s.url), ["/new"]);
+  });
+  test("a string after a comparison is still a string", () => {
+    const root = app({ "src/routes/new.tsx": `const example = "a" > 'Route = createFileRoute("/old")({ component: Old })';\n` + route("/new") });
+    assert.deepEqual(tanstackRoutes(root).map((s) => s.url), ["/new"]);
+  });
+  test("a component() call in a value is not a component property", () => {
+    const root = app({ "src/routes/x.tsx": 'export const Route = createFileRoute("/x")({\n  loader: () => component(),\n});' });
+    assert.deepEqual(tanstackRoutes(root), []);
+  });
+  test("JSX with attributes, expressions and nested tags doesn't hide a later route", () => {
+    const src = 'const Page = () => (\n  <div className="a">\n    <a href={`/x/${id}`}>It\'s {n > 1 ? "many" : <b>one</b>}</a>\n    <img src="y" />\n    <>don\'t</>\n  </div>\n);\n' + 'export const Route = createFileRoute("/new")({ component: Page });';
+    const root = app({ "src/routes/new.tsx": src });
+    assert.deepEqual(tanstackRoutes(root).map((s) => s.url), ["/new"]);
+  });
+  test("a generic arrow in a .tsx file is not JSX", () => {
+    const root = app({ "src/routes/new.tsx": "const id = <T,>(x: T) => x;\nconst pick = <K extends string>(k: K) => k;\n" + route("/new") });
+    assert.deepEqual(tanstackRoutes(root).map((s) => s.url), ["/new"]);
+  });
   test("the component is read from the route's own options", () => {
     const root = app({ "src/routes/x.tsx": 'export const Route = createFileRoute("/x")({ loader: f });\nconst other = { component: Y };' });
     assert.deepEqual(tanstackRoutes(root), []);
