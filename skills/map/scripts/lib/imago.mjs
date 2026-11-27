@@ -63,10 +63,16 @@ export function tanstackRoutes(root, dir = ROUTES_DIR) {
     const src = stripJs(readFileSync(join(root, file), "utf8"));
     // The route is the one assigned (`Route = createFileRoute("…")({ … })`), not a call that sits
     // in a string, and its component is read from that call's own options.
-    const m = src.match(/\bRoute\s*=\s*createFileRoute\(\s*(["'`])([^"'`]+)\1\s*\)\s*\(/);
+    // Matching runs on a copy with every string's contents blanked, so text inside a string
+    // (`'Route = createFileRoute("/old")…'`, `"component: fake"`) is never read as code; the
+    // id is then read from the original at the same place.
+    const code = blankStrings(src);
+    const m = code.match(/\bRoute\s*=\s*createFileRoute\(\s*(["'`])([^"'`]*)\1\s*\)\s*\(/);
     if (!m) continue;
-    if (!/\bcomponent\s*:/.test(callBody(src, m.index + m[0].length - 1))) continue;
-    const id = m[2];
+    if (!/\bcomponent\s*:/.test(callBody(code, m.index + m[0].length - 1))) continue;
+    const idStart = m.index + m[0].indexOf(m[1]) + 1;
+    const id = src.slice(idStart, idStart + m[2].length);
+    if (!id.trim()) continue;
     const last = id.split("/").filter(Boolean).pop() ?? "";
     // A pathless layout (`_layout`) is not a screen, but it still counts as its parent's child.
     found.push({ id, url: routeUrl(id), file: relative(root, join(root, file)), outlet: /<Outlet\b/.test(src), pathless: last.startsWith("_") });
@@ -81,6 +87,29 @@ export function tanstackRoutes(root, dir = ROUTES_DIR) {
     .filter((r) => !(r.outlet && (hasChild(r) || indexOf(r))))
     .map(({ id, url, file }) => ({ id, url, file }));
   return screens.sort((a, b) => a.url.localeCompare(b.url) || a.file.localeCompare(b.file));
+}
+
+/** `src` with each string's contents replaced by spaces (quotes and length kept). */
+function blankStrings(src) {
+  let out = "";
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (c !== '"' && c !== "'" && c !== "`") {
+      out += c;
+      continue;
+    }
+    out += c;
+    let j = i + 1;
+    for (; j < src.length && src[j] !== c; j++) {
+      if (src[j] === "\\" && j + 1 < src.length) {
+        out += "  ";
+        j++;
+      } else out += src[j] === "\n" ? "\n" : " ";
+    }
+    if (j < src.length) out += c;
+    i = j;
+  }
+  return out;
 }
 
 /** The text of the call whose `(` is at `open`, to its matching `)` (strings skipped). */
