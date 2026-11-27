@@ -68,8 +68,8 @@ export function tanstackRoutes(root, dir = ROUTES_DIR) {
     if (!/\bcomponent\s*:/.test(callBody(src, m.index + m[0].length - 1))) continue;
     const id = m[2];
     const last = id.split("/").filter(Boolean).pop() ?? "";
-    if (last.startsWith("_")) continue; // a pathless layout, not a screen
-    found.push({ id, url: routeUrl(id), file: relative(root, join(root, file)), outlet: /<Outlet\b/.test(src) });
+    // A pathless layout (`_layout`) is not a screen, but it still counts as its parent's child.
+    found.push({ id, url: routeUrl(id), file: relative(root, join(root, file)), outlet: /<Outlet\b/.test(src), pathless: last.startsWith("_") });
   }
   // A route that renders <Outlet /> and has child routes (by id, whatever the file layout: a
   // folder, `posts.index.tsx`, `posts/route.tsx`) is its children's layout, not a screen.
@@ -77,6 +77,7 @@ export function tanstackRoutes(root, dir = ROUTES_DIR) {
   const hasChild = (r) => found.some((o) => o !== r && o.id !== r.id && o.id.startsWith(prefix(r.id)) && o.id !== prefix(r.id));
   const indexOf = (r) => found.some((o) => o !== r && o.id === prefix(r.id));
   const screens = found
+    .filter((r) => !r.pathless)
     .filter((r) => !(r.outlet && (hasChild(r) || indexOf(r))))
     .map(({ id, url, file }) => ({ id, url, file }));
   return screens.sort((a, b) => a.url.localeCompare(b.url) || a.file.localeCompare(b.file));

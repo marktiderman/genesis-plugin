@@ -68,6 +68,14 @@ describe("tanstackRoutes, the review's cases", () => {
     const root = app({ "src/routes/x.tsx": 'export const Route = createFileRoute("/x")({ loader: f });\nconst other = { component: Y };' });
     assert.deepEqual(tanstackRoutes(root), []);
   });
+  test("a route whose only child is a pathless layout is a layout", () => {
+    const root = app({
+      "src/routes/posts.tsx": route("/posts", " <Outlet />"),
+      "src/routes/posts/_layout.tsx": route("/posts/_layout", " <Outlet />"),
+      "src/routes/posts/_layout/list.tsx": route("/posts/_layout/list"),
+    });
+    assert.deepEqual(tanstackRoutes(root).map((s) => s.url), ["/posts/list"]);
+  });
   test("a flat layout (posts.tsx + posts.index.tsx) is a layout; a leaf with an Outlet stays a screen", () => {
     const root = app({
       "src/routes/posts.tsx": route("/posts", " <Outlet />"),
