@@ -72,6 +72,18 @@ describe("tanstackRoutes, the review's cases", () => {
     const root = app({ "src/routes/x.tsx": 'export const Route = createFileRoute("/x")({ loader: () => "component: fake" });' });
     assert.deepEqual(tanstackRoutes(root), []);
   });
+  test("an apostrophe in JSX text doesn't hide the route", () => {
+    const root = app({ "src/routes/new.tsx": "const Page = () => <p>Don't panic</p>;\n" + 'export const Route = createFileRoute("/new")({ component: Page });' });
+    assert.deepEqual(tanstackRoutes(root).map((s) => s.url), ["/new"]);
+  });
+  test("a nested component property is not the route's component", () => {
+    const root = app({ "src/routes/x.tsx": 'export const Route = createFileRoute("/x")({\n  loader: () => ({ component: "data" }),\n});' });
+    assert.deepEqual(tanstackRoutes(root), []);
+  });
+  test("the shorthand component property counts", () => {
+    const root = app({ "src/routes/y.tsx": 'function component() {}\nexport const Route = createFileRoute("/y")({ component });' });
+    assert.deepEqual(tanstackRoutes(root).map((s) => s.url), ["/y"]);
+  });
   test("the component is read from the route's own options", () => {
     const root = app({ "src/routes/x.tsx": 'export const Route = createFileRoute("/x")({ loader: f });\nconst other = { component: Y };' });
     assert.deepEqual(tanstackRoutes(root), []);

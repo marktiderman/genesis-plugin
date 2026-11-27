@@ -69,7 +69,7 @@ export function tanstackRoutes(root, dir = ROUTES_DIR) {
     const code = blankStrings(src);
     const m = code.match(/\bRoute\s*=\s*createFileRoute\(\s*(["'`])([^"'`]*)\1\s*\)\s*\(/);
     if (!m) continue;
-    if (!/\bcomponent\s*:/.test(callBody(code, m.index + m[0].length - 1))) continue;
+    if (!hasTopLevelComponent(callBody(code, m.index + m[0].length - 1))) continue;
     const idStart = m.index + m[0].indexOf(m[1]) + 1;
     const id = src.slice(idStart, idStart + m[2].length);
     if (!id.trim()) continue;
@@ -89,12 +89,31 @@ export function tanstackRoutes(root, dir = ROUTES_DIR) {
   return screens.sort((a, b) => a.url.localeCompare(b.url) || a.file.localeCompare(b.file));
 }
 
+/**
+ * Whether a quote at `i` opens a string. In code a string follows an operator, a bracket, a
+ * comma or a keyword (`return "…"`); in JSX text (`<p>Don't panic</p>`) the quote follows a
+ * word, and is just a character.
+ */
+function opensString(src, i) {
+  let k = i - 1;
+  while (k >= 0 && /\s/.test(src[k])) k--;
+  if (k < 0) return true;
+  const p = src[k];
+  if (p === ">") return src[k - 1] === "="; // `=> "…"`, not the end of a JSX tag
+  if (/[\w$]/.test(p)) {
+    let w = k;
+    while (w > 0 && /[\w$]/.test(src[w - 1])) w--;
+    return /^(return|case|typeof|in|of|await|yield|else|void|delete|throw|export|from|import)$/.test(src.slice(w, k + 1));
+  }
+  return !/[)\]}"'`]/.test(p);
+}
+
 /** `src` with each string's contents replaced by spaces (quotes and length kept). */
 function blankStrings(src) {
   let out = "";
   for (let i = 0; i < src.length; i++) {
     const c = src[i];
-    if (c !== '"' && c !== "'" && c !== "`") {
+    if ((c !== '"' && c !== "'" && c !== "`") || !opensString(src, i)) {
       out += c;
       continue;
     }
@@ -112,19 +131,34 @@ function blankStrings(src) {
   return out;
 }
 
-/** The text of the call whose `(` is at `open`, to its matching `)` (strings skipped). */
-function callBody(src, open) {
+/** The text of the call whose `(` is at `open`, to its matching `)`, in string-blanked code. */
+function callBody(code, open) {
   let depth = 0;
-  for (let i = open; i < src.length; i++) {
-    const c = src[i];
-    if (c === '"' || c === "'" || c === "`") {
-      for (i++; i < src.length && src[i] !== c; i++) if (src[i] === "\\") i++;
-      continue;
-    }
+  for (let i = open; i < code.length; i++) {
+    const c = code[i];
     if (c === "(" || c === "{" || c === "[") depth++;
-    else if (c === ")" || c === "}" || c === "]") if (--depth === 0) return src.slice(open, i + 1);
+    else if (c === ")" || c === "}" || c === "]") if (--depth === 0) return code.slice(open, i + 1);
   }
-  return src.slice(open);
+  return code.slice(open);
+}
+
+/**
+ * Whether the route's options object (the call body `({ … })`, string-blanked) has its own
+ * `component` property (`component: Page` or the shorthand `component`), not one nested in a
+ * loader's result or another value.
+ */
+function hasTopLevelComponent(body) {
+  let depth = 0;
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (c === "(" || c === "{" || c === "[") depth++;
+    else if (c === ")" || c === "}" || c === "]") depth--;
+    else if (depth === 2 && body.startsWith("component", i) && !/[\w$]/.test(body[i - 1] ?? "")) {
+      const rest = body.slice(i + "component".length);
+      if (/^\s*[:,}]/.test(rest) || /^\s*\(/.test(rest)) return true;
+    }
+  }
+  return false;
 }
 
 /** A glob as `map` reads `owns:` (`*` within a segment, `**` across them, `{a,b}`). */
