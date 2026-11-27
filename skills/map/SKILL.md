@@ -253,6 +253,31 @@ the map, prints every fraction to stdout, and serves a dashboard over all four t
 and reloading shows the change without a restart. `--no-serve` stops after the print, for CI or a
 script that only wants the numbers.
 
+## Loading into Imago: `map imago --dry-run`
+
+Imago keeps one code map per product and joins it to the product's map by feature key
+(`work map load --product <slug> <file>`, the `product_load_code_map` function). `map imago`
+builds that file and, first, says what loading it would change:
+
+```bash
+node "$MAP" imago --dry-run --root . --product <slug> \
+  [--map-features features.json]   # the product's map, as Imago's `features` tool returns it
+  [--current code-map.json]        # the code map loaded now, to count criteria dropped
+  [--out code-map.json]            # write the file to load; nothing else is ever written
+```
+
+- It only runs as a dry run, and it never calls Imago. Loading stays Imago's own step, taken by a
+  person who has read the dry run.
+- Screens come from TanStack file routes (`src/routes/**`, each `createFileRoute("…")` with a
+  `component`; a pathless `_layout` or a route file that renders `<Outlet />` over its own folder
+  is a layout, not a screen). Features come from a Genesis `features.json` (`links.code`,
+  `acceptance`) and `data/features/` rows (`owns:`).
+- The report says what the load replaces (the code snapshot), what it adds or drops (the code's own
+  criteria, source `code`), and what it leaves alone: every map feature's name, owner, job,
+  placement, status and stage. The loader writes none of those.
+- A product whose code names no features (no `features.json`, no `data/features/`) gets every screen
+  as "nobody", and every map feature as "On the map, no code". The dry run says so before it lands.
+
 ## What it cannot see
 
 Route extraction reads JSX, not a type-checked tree. It scans each `<Route>` tag to its closing

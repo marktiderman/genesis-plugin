@@ -37,6 +37,8 @@ import {
 } from "./lib/resources.js";
 import { surfaceResourceEdges } from "./lib/resource-edges.js";
 import { loadMapTables, outFile, renderUserFlowsDoc } from "./lib/flows.mjs";
+import { buildCodeMap, codeFeatures, planLoad, renderPlan, tanstackRoutes } from "./lib/imago.mjs";
+import { execFileSync } from "node:child_process";
 
 const HELP = `map — map a codebase into gitdata rows
 
@@ -44,6 +46,9 @@ const HELP = `map — map a codebase into gitdata rows
   map sync  [--root <dir>]   re-extract surfaces and resources, report what changed
   map check [--root <dir>]   report without writing; exit 1 on findings (CI, pre-push)
   map flows [--root <dir>]   regenerate the generated flows doc from data/flows/
+  map imago --dry-run --product <slug> [--root <dir>] [--map-features <json>] [--current <json>] [--out <file>]
+                             build the code map Imago's \`work map load\` takes and say what loading it
+                             would change; writes nothing but --out's file, never calls Imago
 
 Reads:  <root>/src/App.tsx (surfaces), <root>/src/**, <root>/supabase/** (resources),
         <root>/src/lib/nav-registry.ts (optional), <root>/data/{features,surfaces,flows}/ (flows)
@@ -985,6 +990,41 @@ try {
     mkdirSync(dirname(outFile(root)), { recursive: true });
     writeFileSync(outFile(root), rendered);
     console.log(`map flows: wrote ${relative(root, outFile(root))}`);
+    process.exit(0);
+  }
+
+  if (command === "imago") {
+    const flag = (name) => {
+      const i = argv.indexOf(name);
+      return i === -1 ? undefined : argv[i + 1];
+    };
+    // The one way in is a dry run: loading is Imago's own step, taken after a person reads this.
+    if (!argv.includes("--dry-run")) {
+      console.error("✗ map imago only runs as a dry run: pass --dry-run. Load with Imago's `work map load` after reading it.");
+      process.exit(2);
+    }
+    const product = flag("--product") ?? "this product";
+    const readJson = (f) => (f ? JSON.parse(readFileSync(resolve(f), "utf8")) : undefined);
+    const git = (...a) => {
+      try {
+        return execFileSync("git", a, { cwd: root, encoding: "utf8" }).trim();
+      } catch {
+        return null;
+      }
+    };
+    const resources = extractResources(root).map((r) => ({ id: r.id, name: r.name, backing: r.backing }));
+    const next = buildCodeMap({
+      meta: { commit: git("rev-parse", "--short=12", "HEAD") ?? "uncommitted", branch: git("rev-parse", "--abbrev-ref", "HEAD"), app: product, at: git("log", "-1", "--format=%cI") },
+      screens: tanstackRoutes(root),
+      features: codeFeatures(root, readFeatures(root)),
+      resources,
+    });
+    const mapFeaturesFile = readJson(flag("--map-features"));
+    const mapFeatures = mapFeaturesFile ? (Array.isArray(mapFeaturesFile) ? mapFeaturesFile : mapFeaturesFile.nodes ?? mapFeaturesFile.features) : null;
+    const current = argv.includes("--current") ? readJson(flag("--current")) ?? null : undefined;
+    const out = flag("--out");
+    if (out) writeFileSync(resolve(out), JSON.stringify(next, null, 2) + "\n", "utf8");
+    console.log(renderPlan(planLoad(next, { mapFeatures, current }), { product, written: out ?? null }));
     process.exit(0);
   }
 
