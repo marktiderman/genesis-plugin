@@ -61,10 +61,12 @@ export function tanstackRoutes(root, dir = ROUTES_DIR) {
     if (!/\.(t|j)sx?$/.test(file) || /\.(test|spec)\./.test(file)) continue;
     // Comments blanked first: a commented-out route is not a route.
     const src = stripJs(readFileSync(join(root, file), "utf8"));
-    const m = src.match(/createFileRoute\(\s*["'`]([^"'`]+)["'`]\s*\)/);
+    // The route is the one assigned (`Route = createFileRoute("…")({ … })`), not a call that sits
+    // in a string, and its component is read from that call's own options.
+    const m = src.match(/\bRoute\s*=\s*createFileRoute\(\s*(["'`])([^"'`]+)\1\s*\)\s*\(/);
     if (!m) continue;
-    if (!/\bcomponent\s*:/.test(src)) continue;
-    const id = m[1];
+    if (!/\bcomponent\s*:/.test(callBody(src, m.index + m[0].length - 1))) continue;
+    const id = m[2];
     const last = id.split("/").filter(Boolean).pop() ?? "";
     if (last.startsWith("_")) continue; // a pathless layout, not a screen
     found.push({ id, url: routeUrl(id), file: relative(root, join(root, file)), outlet: /<Outlet\b/.test(src) });
@@ -78,6 +80,21 @@ export function tanstackRoutes(root, dir = ROUTES_DIR) {
     .filter((r) => !(r.outlet && (hasChild(r) || indexOf(r))))
     .map(({ id, url, file }) => ({ id, url, file }));
   return screens.sort((a, b) => a.url.localeCompare(b.url) || a.file.localeCompare(b.file));
+}
+
+/** The text of the call whose `(` is at `open`, to its matching `)` (strings skipped). */
+function callBody(src, open) {
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    const c = src[i];
+    if (c === '"' || c === "'" || c === "`") {
+      for (i++; i < src.length && src[i] !== c; i++) if (src[i] === "\\") i++;
+      continue;
+    }
+    if (c === "(" || c === "{" || c === "[") depth++;
+    else if (c === ")" || c === "}" || c === "]") if (--depth === 0) return src.slice(open, i + 1);
+  }
+  return src.slice(open);
 }
 
 /** A glob as `map` reads `owns:` (`*` within a segment, `**` across them, `{a,b}`). */

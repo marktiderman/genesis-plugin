@@ -60,6 +60,14 @@ describe("tanstackRoutes, the review's cases", () => {
     const root = app({ "src/routes/new.tsx": '// createFileRoute("/old")({ component: Old })\n' + route("/new") });
     assert.deepEqual(tanstackRoutes(root).map((s) => s.url), ["/new"]);
   });
+  test("a createFileRoute inside a string is not the route", () => {
+    const root = app({ "src/routes/new.tsx": `const example = 'createFileRoute("/old")';\n` + route("/new") });
+    assert.deepEqual(tanstackRoutes(root).map((s) => s.url), ["/new"]);
+  });
+  test("the component is read from the route's own options", () => {
+    const root = app({ "src/routes/x.tsx": 'export const Route = createFileRoute("/x")({ loader: f });\nconst other = { component: Y };' });
+    assert.deepEqual(tanstackRoutes(root), []);
+  });
   test("a flat layout (posts.tsx + posts.index.tsx) is a layout; a leaf with an Outlet stays a screen", () => {
     const root = app({
       "src/routes/posts.tsx": route("/posts", " <Outlet />"),
