@@ -16,6 +16,8 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
+import { stripJs } from "./resources.js";
+
 const ROUTES_DIR = "src/routes";
 
 /** Every file under `dir`, relative to `root`, in a stable order. */
@@ -41,6 +43,7 @@ export function routeUrl(id) {
     .split("/")
     .filter(Boolean)
     .filter((s) => !s.startsWith("_"))
+    .filter((s) => !/^\(.*\)$/.test(s)) // a route group, `(auth)`, is not in the URL
     .map((s) => s.replace(/_$/, ""))
     .filter((s) => s !== "index");
   return "/" + segments.join("/");
@@ -48,26 +51,32 @@ export function routeUrl(id) {
 
 /**
  * The screens of a TanStack Router app: one per file under src/routes that calls
- * `createFileRoute("…")` with a `component`. A layout (its last segment pathless, like `_owner`)
- * wraps screens rather than being one; the root route and server-only routes have no
+ * `createFileRoute("…")` with a `component`. A layout (its last segment pathless, like `_owner`,
+ * or a route that renders `<Outlet />` and has child routes) wraps screens rather than being one; the root route and server-only routes have no
  * `createFileRoute(…)` component. A route file named through a variable is not read.
  */
 export function tanstackRoutes(root, dir = ROUTES_DIR) {
-  const screens = [];
+  const found = [];
   for (const file of walk(root, dir)) {
     if (!/\.(t|j)sx?$/.test(file) || /\.(test|spec)\./.test(file)) continue;
-    const src = readFileSync(join(root, file), "utf8");
+    // Comments blanked first: a commented-out route is not a route.
+    const src = stripJs(readFileSync(join(root, file), "utf8"));
     const m = src.match(/createFileRoute\(\s*["'`]([^"'`]+)["'`]\s*\)/);
     if (!m) continue;
     if (!/\bcomponent\s*:/.test(src)) continue;
     const id = m[1];
     const last = id.split("/").filter(Boolean).pop() ?? "";
-    if (last.startsWith("_")) continue; // a layout, not a screen
-    // A route file with a folder of its own that renders <Outlet /> is its children's layout.
-    const folder = join(root, file.replace(/\.(t|j)sx?$/, ""));
-    if (/<Outlet\b/.test(src) && existsSync(folder) && statSync(folder).isDirectory()) continue;
-    screens.push({ id, url: routeUrl(id), file: relative(root, join(root, file)) });
+    if (last.startsWith("_")) continue; // a pathless layout, not a screen
+    found.push({ id, url: routeUrl(id), file: relative(root, join(root, file)), outlet: /<Outlet\b/.test(src) });
   }
+  // A route that renders <Outlet /> and has child routes (by id, whatever the file layout: a
+  // folder, `posts.index.tsx`, `posts/route.tsx`) is its children's layout, not a screen.
+  const prefix = (id) => id.replace(/\/+$/, "") + "/";
+  const hasChild = (r) => found.some((o) => o !== r && o.id !== r.id && o.id.startsWith(prefix(r.id)) && o.id !== prefix(r.id));
+  const indexOf = (r) => found.some((o) => o !== r && o.id === prefix(r.id));
+  const screens = found
+    .filter((r) => !(r.outlet && (hasChild(r) || indexOf(r))))
+    .map(({ id, url, file }) => ({ id, url, file }));
   return screens.sort((a, b) => a.url.localeCompare(b.url) || a.file.localeCompare(b.file));
 }
 

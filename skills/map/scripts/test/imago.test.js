@@ -52,6 +52,24 @@ describe("tanstackRoutes", () => {
   });
 });
 
+describe("tanstackRoutes, the review's cases", () => {
+  test("a route group is not in the URL", () => {
+    assert.equal(routeUrl("/(auth)/login"), "/login");
+  });
+  test("a commented-out route is not read over the live one", () => {
+    const root = app({ "src/routes/new.tsx": '// createFileRoute("/old")({ component: Old })\n' + route("/new") });
+    assert.deepEqual(tanstackRoutes(root).map((s) => s.url), ["/new"]);
+  });
+  test("a flat layout (posts.tsx + posts.index.tsx) is a layout; a leaf with an Outlet stays a screen", () => {
+    const root = app({
+      "src/routes/posts.tsx": route("/posts", " <Outlet />"),
+      "src/routes/posts.index.tsx": route("/posts/"),
+      "src/routes/about.tsx": route("/about", " <Outlet />"),
+    });
+    assert.deepEqual(tanstackRoutes(root).map((s) => s.file), ["src/routes/about.tsx", "src/routes/posts.index.tsx"]);
+  });
+});
+
 describe("buildCodeMap and planLoad", () => {
   const root = app({
     "src/routes/_owner/map/index.tsx": route("/_owner/map/"),
